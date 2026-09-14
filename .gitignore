@@ -1,0 +1,38 @@
+# ---- 环境与密钥 ----
+.env
+.env.local
+.env.*
+!.env.example
+*.local
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.pytest_tmp/
+.mypy_cache/
+
+# ---- SQLite 数据库 ----
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/
+
+# ---- Node / 前端 ----
+node_modules/
+dist/
+*.tsbuildinfo
+
+# ---- 文档渲染检查产物 ----
+docs/learning/*.pdf
+
+# ---- 编辑器 / 系统 ----
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+.claude/
+/-w

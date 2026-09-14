@@ -1,0 +1,222 @@
+"""MSAL public-client authorization code flow; flow secrets stay in memory."""
+import secrets
+import threading
+import time
+from urllib.parse import urlsplit
+from uuid import UUID
+
+import msal
+from msal_extensions.persistence import PersistenceError
+
+from app.schemas.calendar import ConnectionStatus
+from .credentials import encrypted_cache
+from .errors import CalendarError
+from .security import secure_library_logging
+
+SCOPES = ["Calendars.Read"]
+WRITE_SCOPES = ["Calendars.ReadWrite"]
+FLOW_TTL_SECONDS = 600
+
+
+class MicrosoftAuth:
+    def __init__(self, config, *, cache_factory=encrypted_cache,
+                 app_factory=msal.PublicClientApplication, monotonic=time.monotonic):
+        self.config = config
+        self._cache_factory, self._app_factory = cache_factory, app_factory
+        self._clock = monotonic
+        self._lock = threading.RLock()
+        self._cache = None
+        self._app = None
+        self._flow = None
+        self._binding = None
+        self._expires = 0.0
+        self._auth_required = False
+        secure_library_logging()
+
+    def _validate_config(self):
+        if not self.config.jarvis_microsoft_client_id.strip():
+            raise CalendarError("CALENDAR_NOT_CONFIGURED")
+        try:
+            if str(UUID(self.config.jarvis_microsoft_client_id)) != self.config.jarvis_microsoft_client_id.lower():
+                raise ValueError()
+            if self.config.jarvis_microsoft_authority != "https://login.microsoftonline.com/common":
+                raise ValueError()
+            if self.config.jarvis_microsoft_graph_base != "https://graph.microsoft.com/v1.0":
+                raise ValueError()
+            uri = urlsplit(self.config.jarvis_microsoft_redirect_uri)
+            if (uri.scheme != "http" or uri.hostname != "localhost"
+                    or uri.path != "/api/calendar/oauth/callback"
+                    or not uri.port or uri.username or uri.password or uri.query or uri.fragment):
+                raise ValueError()
+        except (ValueError, TypeError, AttributeError):
+            raise CalendarError("CALENDAR_CONFIG_INVALID") from None
+
+    def _get_cache(self):
+        self._validate_config()
+        if self._cache is None:
+            self._cache = self._cache_factory(self.config.jarvis_microsoft_client_id)
+        if self._cache.is_encrypted is not True:
+            raise CalendarError("CALENDAR_AUTH_STORAGE_UNAVAILABLE")
+        return self._cache
+
+    def _get_app(self):
+        cache = self._get_cache()
+        if self._app is None:
+            self._app = self._app_factory(
+                self.config.jarvis_microsoft_client_id,
+                authority=self.config.jarvis_microsoft_authority,
+                token_cache=cache, timeout=10, enable_pii_log=False,
+                enable_broker_on_windows=False,
+            )
+            secure_library_logging()
+        return self._app
+
+    def _accounts(self):
+        return list(self._get_cache().search(msal.TokenCache.CredentialType.ACCOUNT))
+
+    def _has_cached_scope(self, scope: str, account: dict) -> bool:
+        wanted = scope.casefold()
+        for token in self._get_cache().search(msal.TokenCache.CredentialType.ACCESS_TOKEN):
+            if token.get("home_account_id") != account.get("home_account_id"):
+                continue
+            target = token.get("target")
+            if isinstance(target, str) and wanted in {part.casefold() for part in target.split()}:
+                return True
+        return False
+
+    def get_connection_status(self):
+        if not self.config.jarvis_microsoft_client_id.strip():
+            return ConnectionStatus(connected=False, configured=False)
+        with self._lock:
+            try:
+                accounts = self._accounts()
+                connected = len(accounts) == 1 and not self._auth_required
+                hint = accounts[0].get("username") if connected else None
+                return ConnectionStatus(connected=connected,
+                                        account_hint=hint[:200] if isinstance(hint, str) else None,
+                                        read_authorized=connected,
+                                        write_authorized=(connected and self._has_cached_scope("Calendars.ReadWrite", accounts[0])))
+            except CalendarError:
+                raise
+            except Exception:
+                raise CalendarError("CALENDAR_AUTH_STORAGE_UNAVAILABLE") from None
+
+    def begin(self) -> tuple[str, str]:
+        return self._begin(SCOPES)
+
+    def begin_write(self) -> tuple[str, str]:
+        """Start a distinct incremental-consent flow for calendar writes."""
+        self.access_token()  # Existing read connection is the prerequisite.
+        return self._begin(WRITE_SCOPES)
+
+    def _begin(self, scopes: list[str]) -> tuple[str, str]:
+        with self._lock:
+            try:
+                app = self._get_app()
+                # PKCE, nonce and unpredictable OAuth state are generated by MSAL.
+                flow = app.initiate_auth_code_flow(
+                    scopes=scopes, redirect_uri=self.config.jarvis_microsoft_redirect_uri,
+                    response_mode="query", prompt="select_account",
+                )
+                uri = urlsplit(flow["auth_uri"])
+                if (uri.scheme != "https" or uri.netloc != "login.microsoftonline.com"
+                        or not flow.get("state") or not flow.get("code_verifier")):
+                    raise CalendarError("CALENDAR_AUTH_FAILED")
+                self._flow = flow
+                self._binding = secrets.token_urlsafe(32)
+                self._expires = self._clock() + FLOW_TTL_SECONDS
+                return flow["auth_uri"], self._binding
+            except CalendarError:
+                raise
+            except (PersistenceError, OSError):
+                raise CalendarError("CALENDAR_AUTH_STORAGE_UNAVAILABLE") from None
+            except Exception:
+                raise CalendarError("CALENDAR_AUTH_FAILED") from None
+
+    def finish(self, response: dict[str, str], binding: str | None):
+        with self._lock:
+            flow = self._flow
+            valid_binding = bool(binding and self._binding and
+                                 secrets.compare_digest(binding, self._binding))
+            if not flow or not valid_binding:
+                raise CalendarError("CALENDAR_AUTH_STATE_INVALID")
+            # Consume before exchange; repeated callback cannot redeem code again.
+            self._flow, self._binding = None, None
+            if (self._clock() >= self._expires or not response.get("state")
+                    or not secrets.compare_digest(response["state"], flow["state"])):
+                raise CalendarError("CALENDAR_AUTH_STATE_INVALID")
+            try:
+                result = self._get_app().acquire_token_by_auth_code_flow(flow, response)
+                if not isinstance(result, dict) or not result.get("access_token"):
+                    raise CalendarError("CALENDAR_AUTH_FAILED")
+                accounts = self._get_app().get_accounts()
+                # V1 has a single active account. Remove older cached identities.
+                claims = result.get("id_token_claims", {})
+                account_id = claims.get("oid") or claims.get("sub")
+                if len(accounts) > 1:
+                    matched = [a for a in accounts if a.get("local_account_id") == account_id]
+                    if len(matched) != 1:
+                        raise CalendarError("CALENDAR_AUTH_FAILED")
+                    for account in accounts:
+                        if account != matched[0]:
+                            self._app.remove_account(account)
+                self._auth_required = False
+            except CalendarError:
+                raise
+            except (PersistenceError, OSError):
+                raise CalendarError("CALENDAR_AUTH_STORAGE_UNAVAILABLE") from None
+            except Exception:
+                raise CalendarError("CALENDAR_AUTH_FAILED") from None
+
+    def access_token(self, *, force_refresh=False) -> str:
+        return self._access_token(SCOPES, force_refresh=force_refresh, write=False)
+
+    def write_access_token(self, *, force_refresh=False) -> str:
+        return self._access_token(WRITE_SCOPES, force_refresh=force_refresh, write=True)
+
+    def _access_token(self, scopes: list[str], *, force_refresh: bool, write: bool) -> str:
+        with self._lock:
+            try:
+                accounts = self._accounts()
+                if len(accounts) != 1 or self._auth_required:
+                    raise CalendarError("CALENDAR_NOT_CONNECTED")
+                # Refresh token handling belongs entirely to MSAL.
+                result = self._get_app().acquire_token_silent(
+                    scopes, account=accounts[0], force_refresh=force_refresh)
+                if not isinstance(result, dict) or not isinstance(result.get("access_token"), str):
+                    if write:
+                        raise CalendarError("CALENDAR_WRITE_AUTH_REQUIRED")
+                    self._auth_required = True
+                    raise CalendarError("CALENDAR_AUTH_FAILED")
+                return result["access_token"]
+            except CalendarError:
+                raise
+            except (PersistenceError, OSError):
+                raise CalendarError("CALENDAR_AUTH_STORAGE_UNAVAILABLE") from None
+            except Exception:
+                raise CalendarError("CALENDAR_AUTH_FAILED") from None
+
+    def mark_auth_required(self):
+        with self._lock:
+            self._auth_required = True
+
+    def disconnect(self):
+        with self._lock:
+            self._flow, self._binding = None, None
+            try:
+                cache = self._get_cache()
+                # Entire cache is dedicated to this local integration/client.
+                # Delete credentials via MSAL cache APIs even without internet.
+                for kind in (msal.TokenCache.CredentialType.ACCESS_TOKEN,
+                             msal.TokenCache.CredentialType.REFRESH_TOKEN,
+                             msal.TokenCache.CredentialType.ID_TOKEN,
+                             msal.TokenCache.CredentialType.ACCOUNT,
+                             msal.TokenCache.CredentialType.APP_METADATA):
+                    for entry in list(cache.search(kind)):
+                        cache.modify(kind, entry)
+                self._app = None
+                self._auth_required = False
+            except CalendarError:
+                raise
+            except Exception:
+                raise CalendarError("CALENDAR_AUTH_STORAGE_UNAVAILABLE") from None

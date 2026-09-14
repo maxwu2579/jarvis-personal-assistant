@@ -1,0 +1,18 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+sqlalchemy>=2.0.36
+pydantic>=2.9
+pydantic-settings>=2.4
+alembic>=1.13
+openai>=1.40
+# Phase 9A: public-client OAuth, Windows encrypted cache, Graph HTTP client.
+msal>=1.38.0,<2
+msal-extensions>=1.3.1,<2
+httpx>=0.28.1,<0.29
+# Windows 上 zoneinfo 需要 tzdata 提供 IANA 时区数据库
+tzdata>=2024.1
+# PostgreSQL 驱动（Phase 5A：现代 psycopg 3；仅 PG 部署需要，SQLite 模式不受影响）
+psycopg[binary]>=3.2
+# pgvector（Phase 5B：PostgreSQL 原生向量存储与相似度检索的 Python 适配；
+# 含 SQLAlchemy Vector 类型与 psycopg 3 适配器注册。仅 PG 部署需要，SQLite 模式不 import）
+pgvector>=0.3.0,<0.4.0

@@ -1,0 +1,42 @@
+# JARVIS — 可选 PostgreSQL 开发/测试环境（Phase 5A + 5B）
+#
+# 用途：本地一键启动 PostgreSQL 16（预装 pgvector extension），供 Alembic
+# 迁移与门控集成测试使用。SQLite 仍是默认开发路径（零依赖），
+# PostgreSQL 是可选增强：
+#   1) docker compose up -d postgres
+#   2) 根目录 .env 设置 DATABASE_URL=postgresql+psycopg://jarvis:<密码>@127.0.0.1:5432/jarvis_dev
+#   3) cd backend; alembic upgrade head
+#
+# 镜像：pgvector/pgvector:pg16（官方 pgvector 组织的 PG16 构建，内置 vector
+# extension；固定大版本 tag，不做 floating :latest；小版本随上游滚动）。
+#
+# 安全：文件内只有本地开发占位凭据（jarvis_dev_password），
+# 永远不要把它替换成真实密码后提交；.env 由你自行填写，不提交。
+#
+# 注意：测试库名黑名单为 postgres / template0 / template1 / jarvis，
+# 本 compose 使用 jarvis_dev（不在黑名单），可直接用于门控集成测试。
+# 如需修改端口映射，只改左侧宿主机端口（如 "55432:5432"）。
+#
+# 启动由你手动执行（本 compose 不被任何自动化脚本自动拉起）。
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: jarvis-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: jarvis
+      POSTGRES_PASSWORD: jarvis_dev_password   # 占位凭据，仅本地开发
+      POSTGRES_DB: jarvis_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - jarvis_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jarvis -d jarvis_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  jarvis_pg_data:
