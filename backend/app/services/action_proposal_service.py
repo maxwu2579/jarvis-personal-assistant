@@ -50,6 +50,9 @@ UNSUPPORTED_PATTERNS = tuple(
     )
 )
 EXECUTION_CLAIM_PATTERN = re.compile(r"已(?:经)?(?:创建|执行|设置|保存|入队|确认)")
+TERMINAL_CLOCK_PATTERN = re.compile(
+    r"(?P<clock>(?:[01]?\d|2[0-3]):[0-5]\d|\d{1,2}\s*(?:点|时)(?:半|\s*\d{1,2}\s*分?)?)\s*$"
+)
 
 
 def _usage(response: LLMResponse | None) -> tuple[int | None, int | None, int | None]:
@@ -90,6 +93,36 @@ def _is_grounded(phrase: str | None, content: str) -> bool:
     return compact_phrase in compact_content
 
 
+def _canonicalize_calendar_end(
+    candidate: ActionProposalCandidate, content: str
+) -> ActionProposalCandidate:
+    """Collapse only an unambiguous provider-repeated start prefix on the end.
+
+    A real JSON-mode provider may turn ``明天下午3点到4点`` into start
+    ``明天下午3点`` and end ``明天下午4点``.  The latter is not a verbatim
+    substring.  It is safe to reduce it to ``4点`` only when the repeated
+    prefix exactly matches the start prefix and that clock occurs once in the
+    user's request.  No date, daypart, or duration is inferred here; the
+    programmatic range parser remains authoritative.
+    """
+    start = candidate.calendar_start_text
+    end = candidate.calendar_end_text
+    if not start or not end or _is_grounded(end, content) or not _is_grounded(start, content):
+        return candidate
+    start_clock = TERMINAL_CLOCK_PATTERN.search(start)
+    end_clock = TERMINAL_CLOCK_PATTERN.search(end)
+    if start_clock is None or end_clock is None:
+        return candidate
+    start_prefix = re.sub(r"\s+", "", start[: start_clock.start()]).lower()
+    end_prefix = re.sub(r"\s+", "", end[: end_clock.start()]).lower()
+    clock = end_clock.group("clock").strip()
+    compact_clock = re.sub(r"\s+", "", clock).lower()
+    compact_content = re.sub(r"\s+", "", content).lower()
+    if not start_prefix or start_prefix != end_prefix or compact_content.count(compact_clock) != 1:
+        return candidate
+    return candidate.model_copy(update={"calendar_end_text": clock})
+
+
 def _safe_explanation(candidate: ActionProposalCandidate) -> str:
     if EXECUTION_CLAIM_PATTERN.search(candidate.explanation):
         if candidate.intent == "create_calendar_event":
@@ -125,6 +158,9 @@ def _build_validated(
 ) -> ActionProposalOut:
     if candidate.intent == "unsupported":
         return _unsupported()
+
+    if candidate.intent == "create_calendar_event":
+        candidate = _canonicalize_calendar_end(candidate, content)
 
     if not _is_grounded(candidate.task_due_text, content) or not _is_grounded(
         candidate.reminder_time_text, content

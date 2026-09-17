@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 WEEKDAYS = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
 DATE_PATTERN = re.compile(
     r"(?P<absolute>\d{4}-\d{1,2}-\d{1,2})|"
+    r"(?P<absolute_cn>\d{4}年\d{1,2}月\d{1,2}日)|"
     r"(?P<relative>今天|明天|后天|今晚)|"
     r"(?P<week>(?:本周|下周|周)[一二三四五六日天])"
 )
@@ -42,6 +43,14 @@ def parse_relative_date(text: str, current_date: date) -> date:
     if match.group("absolute"):
         try:
             return date.fromisoformat(match.group("absolute"))
+        except ValueError as exc:
+            raise ActionTimeError("DATE_INVALID", "日期格式无效，请重新提供日期。") from exc
+    if match.group("absolute_cn"):
+        try:
+            year, month, day = map(
+                int, re.fullmatch(r"(\d{4})年(\d{1,2})月(\d{1,2})日", match.group("absolute_cn")).groups()
+            )
+            return date(year, month, day)
         except ValueError as exc:
             raise ActionTimeError("DATE_INVALID", "日期格式无效，请重新提供日期。") from exc
 

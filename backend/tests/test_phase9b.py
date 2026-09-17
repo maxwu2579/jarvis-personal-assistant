@@ -152,6 +152,71 @@ def test_calendar_proposal_ready_and_preview_is_read_only(client, fake_provider)
     assert client.get("/api/executions").json() == []
 
 
+def test_real_provider_expanded_end_prefix_is_canonicalized_without_execution(
+    client, fake_provider
+):
+    """Regression for the sanitized shape observed from the real provider."""
+    fake_provider.reply_json = {
+        "intent": "create_calendar_event",
+        "task_title": None,
+        "task_due_text": None,
+        "reminder_time_text": None,
+        "calendar_title": "JARVIS Phase 9B Smoke Test",
+        "calendar_start_text": "2026年9月18日下午4点",
+        "calendar_end_text": "2026年9月18日下午4点15分",
+        "calendar_location": "Local Test",
+        "explanation": "这是一个日历事件预览，尚未创建。",
+    }
+    cid = conversation(client)
+    response = client.post(
+        f"/api/conversations/{cid}/action-proposals",
+        json={
+            "content": (
+                "2026年9月18日下午4点到4点15分，安排一个名为 "
+                "JARVIS Phase 9B Smoke Test 的日历事件，地点是 Local Test。"
+            ),
+            "timezone": "Asia/Singapore",
+        },
+    )
+    assert response.status_code == 200
+    proposal = response.json()["proposal"]
+    assert proposal["status"] == "READY"
+    assert proposal["action"] == "create_calendar_event"
+    assert proposal["calendar_event"] == {
+        "title": "JARVIS Phase 9B Smoke Test",
+        "start_at": "2026-09-18T08:00:00Z",
+        "end_at": "2026-09-18T08:15:00Z",
+        "location": "Local Test",
+    }
+    assert client.get("/api/executions").json() == []
+
+
+def test_expanded_end_prefix_is_not_canonicalized_when_clock_is_ambiguous(
+    client, fake_provider
+):
+    fake_provider.reply_json = {
+        "intent": "create_calendar_event",
+        "task_title": None,
+        "task_due_text": None,
+        "reminder_time_text": None,
+        "calendar_title": "项目会议",
+        "calendar_start_text": "2026年9月18日下午4点",
+        "calendar_end_text": "2026年9月18日下午4点15分",
+        "calendar_location": None,
+        "explanation": "预览",
+    }
+    cid = conversation(client)
+    response = client.post(
+        f"/api/conversations/{cid}/action-proposals",
+        json={
+            "content": "2026年9月18日下午4点到4点15分开会，4点15分再提醒一次。",
+            "timezone": "Asia/Singapore",
+        },
+    )
+    assert response.json()["proposal"]["status"] == "INVALID"
+    assert client.get("/api/executions").json() == []
+
+
 @pytest.mark.parametrize(("content", "start_text", "end_text", "expected"), [
     ("明天下午3点安排项目会议", "明天下午3点", None, "NEEDS_CLARIFICATION"),
     ("明晚安排项目会议", "明晚", None, "NEEDS_CLARIFICATION"),

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from app.llm.base import LLMTimeoutError
+from app.llm.action_prompts import build_action_proposal_system_prompt
 from app.schemas.action_proposal import ActionProposalCandidate
 from app.services.action_datetime import (
     ActionTimeError,
@@ -276,6 +277,16 @@ def test_structured_gateway_and_security_prompt_are_reused(client, fake_provider
     assert "never execute tools" in system_prompt
     assert "Allowed intents are exactly" in system_prompt
     assert "Program code is the datetime authority" in system_prompt
+
+
+def test_calendar_prompt_requires_each_boundary_to_be_an_exact_user_substring():
+    prompt = build_action_proposal_system_prompt(
+        current_date="2026-09-17", user_timezone="Asia/Singapore"
+    )
+    assert "exact substring" in prompt
+    assert "明天下午3点" in prompt
+    assert "end '4点'" in prompt
+    assert "never expand a boundary" in prompt
 
 
 def test_no_side_effect_matrix(client, fake_provider):

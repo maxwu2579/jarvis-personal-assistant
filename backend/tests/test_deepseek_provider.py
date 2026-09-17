@@ -24,6 +24,7 @@ from app.llm.base import LLMNotConfiguredError, LLMTimeoutError, LLMUpstreamErro
 from app.llm.deepseek_provider import DEEPSEEK_DEFAULT_BASE_URL, DeepSeekChatProvider
 from app.llm.factory import get_llm_provider
 from app.main import app
+from app.schemas.action_proposal import ActionProposalCandidate
 from app.schemas.proposal import TaskProposal
 
 API = "/api/conversations"
@@ -220,6 +221,29 @@ def test_structured_messages_include_explicit_json_instruction(fake_sdk):
     # 调用方原始消息全部保留且顺序不变
     assert messages[-1] == {"role": "user", "content": "安排任务"}
     assert len(messages) == 2
+
+
+def test_action_candidate_contract_cannot_be_mistaken_for_schema_descriptor(fake_sdk):
+    provider = _build_provider()
+    client = _latest_client()
+    provider.generate(
+        [{"role": "user", "content": "安排日历事件"}],
+        response_schema=ActionProposalCandidate,
+    )
+    instruction = client.requests[-1]["messages"][0]["content"]
+    assert "Return the target data object itself" in instruction
+    assert "Do not return wrapper keys" in instruction
+    assert '"fields"' not in instruction
+    assert '"object"' not in instruction
+    for field in ActionProposalCandidate.model_fields:
+        assert field in instruction
+    for intent in (
+        "create_task",
+        "create_task_with_reminder",
+        "create_calendar_event",
+        "unsupported",
+    ):
+        assert intent in instruction
 
 
 def test_structured_schema_summary_length_capped(fake_sdk):

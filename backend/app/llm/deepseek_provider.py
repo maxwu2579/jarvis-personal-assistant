@@ -12,8 +12,6 @@
 客户端初始化、超时、SDK 异常映射与 usage 解析全部复用 openai_provider 的共享辅助。
 """
 
-import json
-
 from pydantic import BaseModel
 
 from app.llm.base import LLMResponse, ProviderMessage
@@ -27,6 +25,9 @@ _JSON_MODE_MAX_SCHEMA_CHARS = 1000
 
 def _field_type(prop: dict) -> str:
     """把 schema 属性的类型压缩为简短字符串（type / const / anyOf 变体）。"""
+    enum = prop.get("enum")
+    if isinstance(enum, list) and enum:
+        return "enum:" + "|".join(str(value) for value in enum)
     prop_type = prop.get("type")
     if isinstance(prop_type, str):
         return prop_type
@@ -36,6 +37,10 @@ def _field_type(prop: dict) -> str:
     if isinstance(any_of, list):
         variants = []
         for item in any_of:
+            item_enum = item.get("enum")
+            if isinstance(item_enum, list) and item_enum:
+                variants.append("enum:" + "|".join(str(value) for value in item_enum))
+                continue
             item_type = item.get("type")
             if isinstance(item_type, str):
                 variants.append(item_type)
@@ -58,22 +63,19 @@ def build_json_mode_system_message(response_schema: type[BaseModel]) -> dict:
         name: _field_type(prop)
         for name, prop in schema.get("properties", {}).items()
     }
-    summary = json.dumps(
-        {
-            "object": schema.get("title") or response_schema.__name__,
-            "fields": fields,
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-    )
+    summary = "; ".join(f"{name}: {field_type}" for name, field_type in fields.items())
     if len(summary) > _JSON_MODE_MAX_SCHEMA_CHARS:
         summary = summary[: _JSON_MODE_MAX_SCHEMA_CHARS] + "...(truncated)"
+    object_name = schema.get("title") or response_schema.__name__
     return {
         "role": "system",
         "content": (
-            "You are in JSON mode. Respond with ONLY a single valid JSON object — "
-            "no markdown code fences, no commentary, nothing outside the JSON object. "
-            "The object MUST conform to the schema required by the backend: " + summary
+            f"JSON mode. Return the target data object itself as one valid {object_name} "
+            "JSON object; no markdown or commentary. "
+            "Return the target data object itself, never a schema descriptor or metadata object. "
+            "Do not return wrapper keys such as object, fields, schema, or properties. "
+            "Use exactly the top-level fields below, include every field, use null for a "
+            "missing nullable value, and follow the declared types/enums: " + summary
         ),
     }
 

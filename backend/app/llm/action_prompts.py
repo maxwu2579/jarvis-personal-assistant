@@ -19,8 +19,10 @@ ACTION_PROPOSAL_SYSTEM_PROMPT = (
     "reminder_time_text=null. A vague daypart such as evening without an hour stays verbatim.\n"
     "6. Reminder time and task due time are different. Never copy one into the other unless the "
     "user explicitly stated both meanings.\n"
-    "7. For create_calendar_event, copy calendar_start_text and calendar_end_text verbatim; never invent a duration. "
-    "calendar_title is the event title and calendar_location is optional.\n"
+    "7. For create_calendar_event, calendar_start_text and calendar_end_text must each be an exact substring "
+    "copied from the user's request; never expand a boundary by repeating date or daypart text that the user "
+    "did not repeat, and never invent a duration. For example, from '明天下午3点到4点' return start "
+    "'明天下午3点' and end '4点'. calendar_title is the event title and calendar_location is optional.\n"
     "8. Use null for missing candidate fields. "
     "The explanation is short, user-visible, and must not claim anything was created or executed.\n"
     "9. Current local date: {current_date}. User timezone: {user_timezone}. "
@@ -49,6 +51,7 @@ def build_action_proposal_user_prompt(content: str) -> str:
     }
     return (
         f"User request: {content}\n\n"
-        "Return one JSON object matching the supplied schema. Do not execute anything. "
+        "Return the candidate object itself with exactly the supplied schema fields, not a schema description. "
+        "Do not execute anything. "
         f"Example shape: {json.dumps(shape, ensure_ascii=False)}"
     )
