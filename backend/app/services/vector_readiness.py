@@ -21,10 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.services.retrieval_errors import RetrievalError, VectorDimensionMismatchError
-
-# 当前 Alembic head revision（Phase 6B 迁移链 head）。
-# 与 backend/alembic/versions/ 下的最新迁移保持一致；测试断言二者相等。
-EXPECTED_MIGRATION_HEAD = "8c9d0e1f2a3b4"
+from app.services.schema_lifecycle import get_expected_alembic_head
 
 # 稳定 readiness 状态码（结构化日志与错误响应使用，不泄漏细节）
 DB_UNAVAILABLE = "DB_UNAVAILABLE"
@@ -80,7 +77,7 @@ def check_pg_vector_readiness(
         ).scalar()
     except SQLAlchemyError:
         return DB_UNAVAILABLE
-    if version != EXPECTED_MIGRATION_HEAD:
+    if version != get_expected_alembic_head():
         return MIGRATION_NOT_CURRENT
 
     try:

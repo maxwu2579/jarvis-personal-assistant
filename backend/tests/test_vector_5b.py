@@ -52,7 +52,6 @@ from app.services.retrieval_errors import (
 )
 from app.services.vector_readiness import (
     DB_UNAVAILABLE,
-    EXPECTED_MIGRATION_HEAD,
     MIGRATION_NOT_CURRENT,
     VECTOR_DIMENSION_MISMATCH,
     VECTOR_EXTENSION_MISSING,
@@ -61,6 +60,7 @@ from app.services.vector_readiness import (
     parse_vector_dimension,
     raise_for_vector_readiness,
 )
+from app.services.schema_lifecycle import get_expected_alembic_head
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 ALEMBIC_VERSIONS = BACKEND_DIR / "alembic" / "versions"
@@ -114,7 +114,7 @@ class _ReadinessStub:
     def __init__(
         self,
         *,
-        version=EXPECTED_MIGRATION_HEAD,
+        version=get_expected_alembic_head(),
         extension=True,
         table=True,
         type_name="vector(384)",
@@ -679,7 +679,8 @@ class TestVectorReadiness:
         cfg = Config(str(BACKEND_DIR / "alembic.ini"))
         cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
         heads = set(ScriptDirectory.from_config(cfg).get_heads())
-        assert heads == {EXPECTED_MIGRATION_HEAD}
+        expected_head = get_expected_alembic_head()
+        assert heads == {expected_head}
         # 每个迁移文件都声明自己的 revision 且在链上（无悬空文件）
         revisions = set()
         for path in ALEMBIC_VERSIONS.glob("*.py"):
@@ -689,7 +690,7 @@ class TestVectorReadiness:
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
             revisions.add(mod.revision)
-        assert EXPECTED_MIGRATION_HEAD in revisions
+        assert expected_head in revisions
         assert len(revisions) == len(list(ALEMBIC_VERSIONS.glob("*.py")))
 
 
@@ -975,6 +976,7 @@ class TestHealthDbPgBranch:
         body = resp.json()
         assert body["status"] == "ok"
         assert body["database"] == "available"
+        assert body["schema_ready"] is True
         assert body["pgvector"] == "ready"
 
     def test_db_unavailable_returns_503_stable_code(self, client, monkeypatch):

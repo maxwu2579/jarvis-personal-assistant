@@ -167,9 +167,10 @@ frontend/                 Vite + React 18 + TypeScript
 
 ### 数据库初始化
 
-- **Phase 0 策略**：开发环境启动时由 `main.py` lifespan 调用 `create_all` 自动建表
-  （幂等，适合快速开发）；
-- **正式迁移路径（Alembic）**：`backend/alembic/` 已配置初始迁移，可从空数据库执行：
+- **唯一 schema authority：Alembic**。FastAPI 启动只读检查数据库当前 revision
+  是否等于迁移链唯一 head；不会建表、升级、stamp 或修补 schema。数据库缺失、
+  空库、落后、未知 revision 或存在 drift 时均 fail closed；
+- `backend/alembic/` 可从不存在的 SQLite 数据库或空数据库显式初始化：
 
   ```powershell
   cd backend
@@ -177,8 +178,8 @@ frontend/                 Vite + React 18 + TypeScript
   alembic upgrade head
   ```
 
-  两者共用同一份 `Base.metadata`，schema 保持一致；迁移测试保证空库可升级。
-  **进入生产部署时切换到 Alembic 并移除 `create_all`**，避免两条初始化路径并存。
+  完成迁移后再启动 JARVIS。普通 revision/schema mismatch 不应使用
+  `alembic stamp head` 代替迁移或人工核验；版本标签本身不能证明结构正确。
   **PostgreSQL（Phase 5A 起）**：在根目录 `.env` 设置
   `DATABASE_URL=postgresql+psycopg://<user>:<密码>@<host>:5432/<db>` 后，
   同一份迁移链在 PG 上执行（SQLite 分支建 FTS5 虚拟表，PG 分支不建）。
@@ -547,22 +548,19 @@ NOT_INDEXED ──────────────────────�
 # RETRIEVAL_CANDIDATE_LIMIT=10000  # 100–100000
 ```
 
-### 测试数据库隔离（Phase 4B 回归保证）
+### 测试数据库隔离（Phase 9.5 回归保证）
 
-Phase 4A 曾发现 TestClient lifespan 的 `create_all` 会作用在模块级 engine 上，
-在真实 `backend/jarvis.db` 建表。修复：conftest 在导入任何 app 模块**之前**
-设置 `DATABASE_URL` / `DOCUMENT_STORAGE_DIR` 指向会话级临时库；并有 4 个
-回归测试固定该保证（engine 指向、文件指纹 SHA-256/mtime/size 前后不变、
-subprocess 验证 lifespan 只在 cwd 建库、测试文件不加载 dotenv）。
+测试在导入应用前强制把 `DATABASE_URL` 指向会话级 disposable SQLite，并显式
+执行 `alembic upgrade head`，让 production lifespan 运行同一只读 revision gate。
+每个业务测试仍可使用独立 `tmp_path` + `create_all` 作为快速隔离脚手架；该路径
+不属于 production startup，也不会接触真实 `backend/jarvis.db`。
 
-### create_all 开发模式的诚实说明
+### Schema lifecycle
 
-应用启动时 `Base.metadata.create_all` 会建全部**普通表**，但**不会建 FTS
-虚拟表**（不在 metadata 里）——索引服务运行期 `ensure_fts_table()` 负责
-幂等创建。因此开发模式下 schema 由两条路径共同构成：create_all 建普通表 +
-运行期建虚拟表；**正式部署走 Alembic**（迁移链含 FTS 建表），见上文
-「数据库初始化」。create_all 只用于本地开发便捷启动，测试一律使用隔离库，
-正式库必须用 `alembic upgrade head`。
+Production startup 不调用 `Base.metadata.create_all`，也不自动运行 `upgrade` 或
+`stamp`。SQLite 配置指向不存在的文件时，会在 SQLAlchemy 首次连接前拒绝启动，
+避免只为检查 readiness 就留下空数据库。迁移链仍负责普通表、索引及 FTS 对象；
+测试中的 isolated `create_all` 仅用于 disposable unit/integration scaffolding。
 
 ## Phase 4C：Grounded RAG Answering with Citations
 
@@ -876,8 +874,9 @@ SQLite + `vector_json` + Python cosine 零依赖路径（行为与 4B 完全一�
 
 `DB_UNAVAILABLE` / `MIGRATION_NOT_CURRENT` / `VECTOR_EXTENSION_MISSING` /
 `VECTOR_SCHEMA_MISSING` / `VECTOR_DIMENSION_MISMATCH` —— 全部 503 且响应
-脱敏（不含 URL / 密码 / SQL / 堆栈）；就绪时 200 + `"pgvector": "ready"`。
-SQLite 分支行为不变。
+脱敏（不含 URL / 密码 / SQL / 堆栈）；就绪时 200 +
+`"schema_ready": true` + `"pgvector": "ready"`。SQLite 同样在 readiness
+调用时只读复核 Alembic revision，并在兼容时返回 `"schema_ready": true`。
 
 ### 配置（根目录 `.env` 可覆盖；不写入 `.env.example`）
 

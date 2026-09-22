@@ -153,7 +153,11 @@ class TestHealthSplit:
     def test_health_db_reports_available(self, client):
         r = client.get("/health/db")
         assert r.status_code == 200
-        assert r.json() == {"status": "ok", "database": "available"}
+        assert r.json() == {
+            "status": "ok",
+            "database": "available",
+            "schema_ready": True,
+        }
 
     def test_health_db_unavailable_sanitized_503(self, client):
         def _boom():

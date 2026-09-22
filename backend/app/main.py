@@ -32,7 +32,7 @@ from app.api.calendar import router as calendar_router, calendar_error_handler
 from app.integrations.calendar.errors import CalendarError
 from app.integrations.calendar.security import CalendarCallbackPrivacy, secure_library_logging
 from app.core.config import settings
-from app.core.database import IS_SQLITE, Base, engine, get_db
+from app.core.database import IS_SQLITE, engine, get_db
 from app.llm.base import LLMNotConfiguredError, LLMTimeoutError, LLMUpstreamError
 from app.services.chat_service import ConversationNotFoundError
 from app.services.document_errors import DOCUMENT_ERROR_STATUS, DocumentError
@@ -44,6 +44,7 @@ from app.services.proposal_service import ProposalSchemaError
 from app.services.rag_errors import RAG_ERROR_STATUS, RAGError
 from app.services.retrieval_errors import RETRIEVAL_ERROR_STATUS, RetrievalError
 from app.services.task_service import InvalidTransitionError, TaskNotFoundError
+from app.services.schema_lifecycle import DatabaseSchemaError, verify_schema_ready
 
 logger = logging.getLogger(__name__)
 
@@ -92,35 +93,16 @@ def _error_body(code: str, message: str) -> dict:
     return {"error": {"code": code, "message": message}}
 
 
-def _ensure_schema_initialized() -> None:
-    """开发模式自动建表，并检测 create_all 与 Alembic 双路径错位。
-
-    create_all 创建的库没有 alembic_version 表；此时若直接 `alembic upgrade head`
-    会因「table already exists」响亮失败（不会静默跳过迁移）。这里在启动时给出
-    明确指引：`alembic stamp head` 把现有 schema 标记为当前版本，之后可正常迁移。
-    """
-    Base.metadata.create_all(bind=engine)
-    if IS_SQLITE:
-        from sqlalchemy import inspect
-
-        inspector = inspect(engine)
-        tables = set(inspector.get_table_names())
-        has_tables = bool(tables & {"tasks", "reminders", "conversations"})
-        if has_tables and "alembic_version" not in tables:
-            logger.warning(
-                "database was created by create_all and has no Alembic version. "
-                "Before using `alembic upgrade head`, run `alembic stamp head` "
-                "in backend/ to align it (see README '数据库初始化')."
-            )
+def _verify_schema_ready() -> None:
+    """Verify the production schema without creating, upgrading, or stamping it."""
+    verify_schema_ready(engine, settings.database_url)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # Phase 0 策略：开发环境启动时自动建表（幂等）。
-    # 正式的数据库初始化路径是 Alembic（backend/alembic，`alembic upgrade head`），
-    # 与 create_all 共用同一份 Base.metadata，schema 保持一致。
-    # 进入生产部署时切换到 Alembic 并移除 create_all（见 README「数据库初始化」）。
-    _ensure_schema_initialized()
+    # Alembic is the sole production schema authority. Startup is read-only and
+    # fails closed when the configured database is not at the unique head.
+    _verify_schema_ready()
     yield
 
 
@@ -349,7 +331,7 @@ def health():
 def health_db(db: Session = Depends(get_db)):
     """数据库可用性探针（readiness）。
 
-    - SQLite：SELECT 1 验证连接；
+    - SQLite：SELECT 1 验证连接，并重新验证 Alembic revision；
     - PostgreSQL：pgvector 能力完整检查，稳定状态码（Phase 5B）：
       DB_UNAVAILABLE / MIGRATION_NOT_CURRENT / VECTOR_EXTENSION_MISSING /
       VECTOR_SCHEMA_MISSING / VECTOR_DIMENSION_MISMATCH；
@@ -358,12 +340,18 @@ def health_db(db: Session = Depends(get_db)):
     if IS_SQLITE:
         try:
             db.execute(text("SELECT 1"))
+            verify_schema_ready(engine, settings.database_url)
         except SQLAlchemyError:
             return JSONResponse(
                 status_code=503,
                 content=_error_body("DB_UNAVAILABLE", "Database is unavailable"),
             )
-        return {"status": "ok", "database": "available"}
+        except DatabaseSchemaError as exc:
+            return JSONResponse(
+                status_code=503,
+                content=_error_body(exc.code, str(exc)),
+            )
+        return {"status": "ok", "database": "available", "schema_ready": True}
     from app.services.vector_readiness import (
         check_pg_vector_readiness,
         readiness_message,
@@ -374,6 +362,7 @@ def health_db(db: Session = Depends(get_db)):
         return {
             "status": "ok",
             "database": "available",
+            "schema_ready": True,
             "pgvector": "ready",
         }
     return JSONResponse(

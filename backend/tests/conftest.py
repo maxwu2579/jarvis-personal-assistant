@@ -3,16 +3,14 @@
 LLM 层固定使用 FakeLLMProvider —— 测试期间绝不连接真实模型或互联网。
 时钟固定为 FIXED_NOW（UTC），测试不依赖真实当前时间。
 
-数据库隔离（Phase 4B 强化）：
+数据库隔离（Phase 9.5 强化）：
 - 本模块顶层在导入任何 app 模块【之前】设置 DATABASE_URL / DOCUMENT_STORAGE_DIR
-  环境变量（pydantic-settings 会读取它们）。这保证 app.core.database 的模块级
-  engine 与 TestClient lifespan 的 create_all 都指向会话级临时库，
-  而不是真实 backend/jarvis.db（Phase 4A 曾发现 lifespan create_all 在
-  真实库上建表）。
-- setdefault：开发者显式设置的环境变量（如指向自己的测试库）优先；
-  默认值 `sqlite:///./jarvis.db`（相对 cwd 的真实库）被覆盖。
+  环境变量（pydantic-settings 会读取它们），并通过显式 Alembic workflow
+  把会话级临时库升级到 head。这保证 app.core.database 的模块级 engine 与
+  TestClient lifespan 的只读 revision gate 都指向隔离库，而不是真实
+  backend/jarvis.db。
 - 每个测试的 client 夹具仍使用独立 tmp_path 库（业务数据隔离）；
-  会话级临时库只承载 lifespan 的 schema 初始化。
+  会话级临时库只承载 production lifespan 的 schema readiness 检查。
 - 会话结束时清理临时目录。
 """
 
@@ -29,15 +27,31 @@ from sqlalchemy.orm import sessionmaker
 
 # ---- 必须先于任何 app 导入设置环境变量（见模块 docstring）----
 _TEST_SESSION_DIR = Path(tempfile.mkdtemp(prefix="jarvis_test_session_"))
-os.environ.setdefault(
-    "DATABASE_URL", f"sqlite:///{_TEST_SESSION_DIR.as_posix()}/session.db"
+_TEST_SESSION_DATABASE_URL = (
+    f"sqlite:///{_TEST_SESSION_DIR.as_posix()}/session.db"
 )
+# Tests always own this disposable database. Never inherit a developer or
+# production DATABASE_URL and then migrate it during collection.
+os.environ["DATABASE_URL"] = _TEST_SESSION_DATABASE_URL
 os.environ.setdefault("DOCUMENT_STORAGE_DIR", str(_TEST_SESSION_DIR / "documents"))
+
+# Production startup is read-only. The test harness prepares its own lifespan
+# database through the explicit Alembic workflow used by fresh installations.
+from alembic import command  # noqa: E402
+from alembic.config import Config  # noqa: E402
+
+_TEST_BACKEND_DIR = Path(__file__).resolve().parents[1]
+_TEST_ALEMBIC_CONFIG = Config(str(_TEST_BACKEND_DIR / "alembic.ini"))
+_TEST_ALEMBIC_CONFIG.set_main_option(
+    "script_location", str(_TEST_BACKEND_DIR / "alembic")
+)
+_TEST_ALEMBIC_CONFIG.set_main_option("sqlalchemy.url", _TEST_SESSION_DATABASE_URL)
+command.upgrade(_TEST_ALEMBIC_CONFIG, "head")
 
 
 @pytest.fixture(scope="session", autouse=True)
 def _cleanup_test_session_dir():
-    """会话结束后清理会话级临时目录（含 lifespan 初始化过的 session.db）。"""
+    """会话结束后清理显式迁移过的 disposable session database。"""
     yield
     shutil.rmtree(_TEST_SESSION_DIR, ignore_errors=True)
 

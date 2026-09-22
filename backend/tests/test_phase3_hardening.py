@@ -538,7 +538,7 @@ def test_migration_downgrade_with_rejected_rows_fails_loudly(tmp_path):
 
 
 def test_create_all_database_does_not_silently_skip_migrations(tmp_path):
-    """create_all 建的库没有 alembic_version：alembic upgrade 必须响亮失败而非跳过。"""
+    """Legacy create_all drift must fail loudly and remain unstamped."""
     db_file = tmp_path / "create_all.db"
     engine = create_engine(f"sqlite:///{db_file}", connect_args={"check_same_thread": False})
     Base.metadata.create_all(bind=engine)  # 模拟开发模式建表（无 alembic_version）
@@ -546,11 +546,13 @@ def test_create_all_database_does_not_silently_skip_migrations(tmp_path):
     with pytest.raises(OperationalError, match="already exists"):
         command.upgrade(_alembic_cfg(db_file), "head")
 
-    # 对齐指引存在：stamp head 后 upgrade 幂等成功
-    command.stamp(_alembic_cfg(db_file), "head")
-    command.upgrade(_alembic_cfg(db_file), "head")
+    # A version label is not proof that this legacy schema matches migrations.
+    # Normal remediation must never apply `stamp head` automatically.
     con = sqlite3.connect(db_file)
-    assert con.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "8c9d0e1f2a3b4"
+    # SQLite DDL is non-transactional, so Alembic may have created its version
+    # table before the first conflicting business table aborts the migration.
+    # Crucially, no revision was stamped into it.
+    assert con.execute("SELECT version_num FROM alembic_version").fetchall() == []
     con.close()
 
 

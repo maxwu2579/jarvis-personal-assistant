@@ -1,8 +1,8 @@
 """测试数据库隔离回归（Phase 4B）：任何测试都不得触碰真实开发库。
 
 Phase 4A 曾发现：TestClient 的 lifespan 会对 app.core.database 的模块级
-engine 执行 create_all，而该 engine 默认绑定真实 backend/jarvis.db
-（settings.database_url 默认 sqlite:///./jarvis.db，相对 cwd 解析）。
+engine 执行 create_all。Phase 9.5 已移除 production create_all，启动只允许
+读取 Alembic revision 并 fail closed。
 
 修复：conftest.py 在导入任何 app 模块之前 setdefault DATABASE_URL /
 DOCUMENT_STORAGE_DIR 到会话级临时目录。本文件用回归测试钉死这一保证：
@@ -10,8 +10,8 @@ DOCUMENT_STORAGE_DIR 到会话级临时目录。本文件用回归测试钉死�
 1. module engine 绝不指向真实库路径；
 2. TestClient 完整业务请求前后，真实库的 SHA-256 / mtime / size 三元组不变；
    若真实库不存在，则测试结束后仍不存在（测试不得创建它）；
-3. 子进程（cwd=临时目录、默认配置）触发 lifespan 时，create_all 只作用于
-   「当前 cwd 下的 jarvis.db」，不产生任何指向真实库的写入；
+3. 子进程（cwd=临时目录、缺失 SQLite 文件）触发 lifespan 时必须失败，且
+   不得创建空 jarvis.db；
 4. 测试代码不加载 dotenv（不读取 .env 文件）。
 """
 
@@ -73,22 +73,25 @@ def test_testclient_requests_leave_real_db_untouched(client):
         assert after[2] == before[2], "real dev database size changed"
 
 
-def test_lifespan_create_all_is_scoped_to_cwd(tmp_path):
-    """子进程（默认 DATABASE_URL、cwd=临时目录）触发 lifespan 时，
-    create_all 只创建「当前目录」的 jarvis.db，绝不写真实 backend/jarvis.db。"""
+def test_lifespan_missing_sqlite_fails_without_creating_file(tmp_path):
+    """缺失 SQLite 文件必须在连接前 fail closed，不留下意外空库。"""
     before = _db_fingerprint(REAL_DB)
 
     script = (
         "import os, sys\n"
-        "os.environ.pop('DATABASE_URL', None)\n"
+        "os.environ['DATABASE_URL'] = 'sqlite:///./jarvis.db'\n"
         "os.environ.pop('DOCUMENT_STORAGE_DIR', None)\n"
         "sys.path.insert(0, sys.argv[2])\n"
         "os.chdir(sys.argv[1])\n"
         "from app.main import app\n"
         "from fastapi.testclient import TestClient\n"
-        "with TestClient(app) as c:\n"
-        "    r = c.get('/health')\n"
-        "    assert r.status_code == 200, r.text\n"
+        "from app.services.schema_lifecycle import DatabaseSchemaError\n"
+        "try:\n"
+        "    with TestClient(app):\n"
+        "        raise AssertionError('startup unexpectedly succeeded')\n"
+        "except DatabaseSchemaError as exc:\n"
+        "    assert exc.code == 'DATABASE_FILE_MISSING', exc.code\n"
+        "assert not (__import__('pathlib').Path.cwd() / 'jarvis.db').exists()\n"
         "print('subprocess-ok')\n"
     )
     proc = subprocess.run(
@@ -101,8 +104,7 @@ def test_lifespan_create_all_is_scoped_to_cwd(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert "subprocess-ok" in proc.stdout
 
-    # 默认 URL 相对 cwd：临时目录下被创建了 jarvis.db（证明 lifespan 起作用）
-    assert (tmp_path / "jarvis.db").exists()
+    assert not (tmp_path / "jarvis.db").exists()
 
     after = _db_fingerprint(REAL_DB)
     if before is None:
