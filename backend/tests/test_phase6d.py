@@ -32,7 +32,7 @@
 29. Phase 6B retry/lease 不回退（重试任务不算 misfire）
 30. Reminder 行为不变（模型/Worker 可导入，表独立可写）
 31. SQLite/PostgreSQL 离线 SQL 兼容（claim/misfire CAS 编译）
-32. 无新增 migration（单 head = 8c9d0e1f2a3b4，链不变）
+32. 历史 6A–6C migration 链不变，当前 migration 保持唯一 head
 
 全部离线：临时 SQLite + FK pragma + create_all；FakeClock 可推进（不真实
 sleep）；monkeypatch 注册表（自动恢复）；绝不访问 jarvis.db / .env。
@@ -45,6 +45,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+
+from app.services.schema_lifecycle import get_expected_alembic_head
 from sqlalchemy import create_engine, event, inspect, or_, update
 from sqlalchemy.orm import sessionmaker
 from alembic.config import Config
@@ -980,17 +982,13 @@ def test_pg_offline_sql_compat():
     assert "executions.run_at" in sql
 
 
-def test_no_new_migration_single_head():
-    """6D 未创建 migration：单 head 仍为 8c9d0e1f2a3b4，链不变。"""
+def test_historical_chain_and_current_single_head():
+    """6D 的历史链不变；允许后续阶段从唯一 head 正常扩展。"""
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
     heads = set(ScriptDirectory.from_config(cfg).get_heads())
-    assert heads == {"8c9d0e1f2a3b4"}
+    assert heads == {get_expected_alembic_head()}
     versions = Path(BACKEND_DIR / "alembic" / "versions")
-    newest = max(p.stat().st_mtime for p in versions.glob("*.py"))
-    for p in versions.glob("*.py"):
-        if p.stat().st_mtime == newest:
-            assert p.name.startswith("8c9d0e1f2a3b4")  # 最新迁移仍是 6C 的
     mods = {}
     for path in versions.glob("*.py"):
         spec = importlib.util.spec_from_file_location(path.stem, path)

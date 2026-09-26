@@ -41,6 +41,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+
+from app.services.schema_lifecycle import get_expected_alembic_head
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.exc import IntegrityError
@@ -1587,7 +1589,7 @@ def test_migration_sqlite_roundtrip_6c(tmp_path):
     con = sqlite3.connect(db_file)
     assert (
         con.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-        == "8c9d0e1f2a3b4"
+        == get_expected_alembic_head()
     )
     con.close()
     engine.dispose()
@@ -1615,7 +1617,7 @@ def test_single_head_and_chain_6c():
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
     heads = set(ScriptDirectory.from_config(cfg).get_heads())
-    assert heads == {"8c9d0e1f2a3b4"}
+    assert heads == {get_expected_alembic_head()}
     import importlib.util
 
     versions = Path(BACKEND_DIR / "alembic" / "versions")

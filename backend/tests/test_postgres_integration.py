@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+
+from app.services.schema_lifecycle import get_expected_alembic_head
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
@@ -125,7 +127,7 @@ class TestMigrationChainOnPostgres:
                 text("SELECT version_num FROM alembic_version")
             ).scalar()
             # 6F 修正：Phase 6A-6C 新增迁移后 head 前进到 8c9d0e1f2a3b4
-            assert version == "8c9d0e1f2a3b4"
+            assert version == get_expected_alembic_head()
             # 5B：vector extension 已安装，HNSW cosine 索引存在
             extension = conn.execute(
                 text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")

@@ -21,8 +21,10 @@ from app.models.proposal import TaskProposal, TaskProposalStatus
 from app.models.rag_audit import RagAnswer, RagAnswerStatus
 from app.models.reminder import Notification, NotificationType, Reminder, ReminderStatus
 from app.models.task import Task, TaskStatus
+from app.models.personal_memory import PersonalMemory
 
 __all__ = [
+    "PersonalMemory",
     "AttemptStatus",
     "ChunkEmbedding",
     "Conversation",

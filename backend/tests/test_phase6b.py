@@ -14,6 +14,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+
+from app.services.schema_lifecycle import get_expected_alembic_head
 from sqlalchemy import create_engine, event, inspect, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
@@ -851,7 +853,7 @@ def test_migration_sqlite_roundtrip_6b(tmp_path):
     con = sqlite3.connect(db_file)
     assert (
         con.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-        == "8c9d0e1f2a3b4"
+        == get_expected_alembic_head()
     )
     con.close()
     engine.dispose()
@@ -878,7 +880,7 @@ def test_single_head_and_chain():
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
     heads = set(ScriptDirectory.from_config(cfg).get_heads())
-    assert heads == {"8c9d0e1f2a3b4"}
+    assert heads == {get_expected_alembic_head()}
     # 6C revision 的直接 down_revision 是 6B
     import importlib.util
 

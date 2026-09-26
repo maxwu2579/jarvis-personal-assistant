@@ -28,6 +28,8 @@ from app.api.rag import router as rag_router
 from app.api.reminders import router as reminders_router
 from app.api.retrieval import router as retrieval_router
 from app.api.tasks import router as tasks_router
+from app.api.memories import router as memories_router
+from app.services.memory_service import MemoryError
 from app.api.calendar import router as calendar_router, calendar_error_handler
 from app.integrations.calendar.errors import CalendarError
 from app.integrations.calendar.security import CalendarCallbackPrivacy, secure_library_logging
@@ -148,6 +150,11 @@ async def task_not_found_handler(_: Request, exc: TaskNotFoundError):
         status_code=404,
         content=_error_body("TASK_NOT_FOUND", f"Task {exc.task_id} does not exist"),
     )
+
+
+@app.exception_handler(MemoryError)
+async def memory_error_handler(_: Request, exc: MemoryError):
+    return JSONResponse(status_code=exc.status, content=_error_body(exc.code, exc.message))
 
 
 @app.exception_handler(InvalidTransitionError)
@@ -304,6 +311,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 
 app.include_router(tasks_router)
+app.include_router(memories_router)
 app.include_router(conversations_router)
 app.include_router(reminders_router)
 app.include_router(documents_router)

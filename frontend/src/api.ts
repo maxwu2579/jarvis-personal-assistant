@@ -1,4 +1,7 @@
 import type {
+  MemoryCategory,
+  MemoryInput,
+  PersonalMemory,
   CalendarConnection,
   CalendarMetadata,
   CalendarEventRange,
@@ -31,6 +34,18 @@ import type {
 // 后端地址通过环境变量 VITE_API_BASE_URL 配置（frontend/.env.local），
 // 未配置时使用本地开发默认值；生产环境必须显式配置。
 const API_URL: string = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
+
+export const listMemories = (category?: MemoryCategory) =>
+  request<PersonalMemory[]>(`/api/memories${category ? `?category=${category}` : ''}`)
+export const getMemory = (id: number) => request<PersonalMemory>(`/api/memories/${id}`)
+export const createMemory = (payload: MemoryInput) => request<PersonalMemory>('/api/memories', {
+  method: 'POST', body: JSON.stringify(payload),
+})
+export const updateMemory = (id: number, payload: MemoryInput, expectedVersion: number) =>
+  request<PersonalMemory>(`/api/memories/${id}`, {
+    method: 'PUT', body: JSON.stringify({ ...payload, expected_version: expectedVersion }),
+  })
+export const deleteMemory = (id: number) => request<{ deleted: boolean }>(`/api/memories/${id}`, { method: 'DELETE' })
 
 export const calendarConnectUrl = `${API_URL}/api/calendar/connect`
 export const calendarWriteAuthorizeUrl = `${API_URL}/api/calendar/authorize-write`

@@ -538,3 +538,10 @@ export interface CalendarEventRange {
   complete: true
   busy_projection_available: false
 }
+export type MemoryCategory = 'preference' | 'stable_fact' | 'constraint'
+export type MemoryScalar = string | number | boolean
+export type MemoryValue = MemoryScalar | MemoryScalar[] | Record<string, MemoryScalar>
+export interface MemoryInput { category: MemoryCategory; key: string; value: MemoryValue }
+export interface PersonalMemory extends MemoryInput {
+  id: number; source_type: 'manual'; version: number; created_at: string; updated_at: string
+}

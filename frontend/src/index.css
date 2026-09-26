@@ -1526,3 +1526,14 @@ textarea:disabled {
 .calendar-events { list-style: none; padding: 0; }
 .calendar-events li { padding: 1rem 0; border-top: 1px solid #e4e9ef; }
 .calendar-events li p { margin: .35rem 0; color: #526174; }
+.memory-panel { max-width: 960px; margin: 0 auto; }
+.memory-form fieldset { border: 0; padding: 0; min-width: 0; display: grid; gap: 12px; }
+.memory-panel label { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.memory-panel input, .memory-panel select, .memory-panel textarea { font: inherit; padding: 8px; border: 1px solid #bbb; border-radius: 6px; max-width: 100%; }
+.memory-value-row, .memory-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.memory-actions { margin: 12px 0; }
+.memory-value-row textarea { flex: 1; min-width: 160px; }
+.memory-list { padding: 0; list-style: none; }
+.memory-list pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.memory-list h3, .memory-confirm h3 { overflow-wrap: anywhere; }
+.memory-confirm { border: 2px solid #a33; border-radius: 8px; padding: 16px; background: #fff8f6; }

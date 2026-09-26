@@ -12,14 +12,16 @@ import ChatView from './components/chat/ChatView'
 import DocumentsView from './components/documents/DocumentsView'
 import ExecutionPanel from './components/executions/ExecutionPanel'
 import CalendarPanel from './components/calendar/CalendarPanel'
+import MemoryPanel from './components/memories/MemoryPanel'
 import NotificationCenter from './components/NotificationCenter'
 import TaskForm from './components/TaskForm'
 import TaskList from './components/TaskList'
 import type { NewTaskInput, Reminder, Task } from './types'
 
-type Tab = 'tasks' | 'chat' | 'documents' | 'executions' | 'calendar'
+type Tab = 'tasks' | 'chat' | 'documents' | 'executions' | 'calendar' | 'memories'
 
 function initialTab(): Tab {
+  if (new URLSearchParams(window.location.search).get('tab') === 'memories') return 'memories'
   if (new URLSearchParams(window.location.search).get('tab') === 'chat') return 'chat'
   if (new URLSearchParams(window.location.search).get('tab') === 'calendar') return 'calendar'
   return new URLSearchParams(window.location.search).get('tab') === 'executions'
@@ -171,9 +173,9 @@ export default function App() {
   const selectTab = (nextTab: Tab): void => {
     setTab(nextTab)
     const url = new URL(window.location.href)
-    if (nextTab === 'executions' || nextTab === 'calendar') {
+    if (nextTab === 'executions' || nextTab === 'calendar' || nextTab === 'memories') {
       url.searchParams.set('tab', nextTab)
-      if (nextTab === 'calendar') url.searchParams.delete('execution')
+      if (nextTab !== 'executions') url.searchParams.delete('execution')
       url.searchParams.delete('calendar_execution')
     } else if (nextTab === 'chat') {
       url.searchParams.set('tab', 'chat')
@@ -265,6 +267,9 @@ export default function App() {
         <button type="button" role="tab" aria-selected={tab === 'calendar'}
           className={`tab-btn${tab === 'calendar' ? ' tab-btn--active' : ''}`}
           onClick={() => selectTab('calendar')}>日历</button>
+        <button type="button" role="tab" aria-selected={tab === 'memories'}
+          className={`tab-btn${tab === 'memories' ? ' tab-btn--active' : ''}`}
+          onClick={() => selectTab('memories')}>记忆</button>
       </nav>
 
       {showNotifications && (
@@ -274,7 +279,7 @@ export default function App() {
         />
       )}
 
-      {tab === 'calendar' ? <CalendarPanel /> : tab === 'tasks' ? (
+      {tab === 'memories' ? <MemoryPanel /> : tab === 'calendar' ? <CalendarPanel /> : tab === 'tasks' ? (
         <TaskSection />
       ) : tab === 'documents' ? (
         <DocumentsView />
