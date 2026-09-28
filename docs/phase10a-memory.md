@@ -73,10 +73,15 @@ Alembic remains the sole schema authority. Startup does not create, migrate,
 stamp or repair databases. Revision readiness is not a full physical schema
 diff or a proof against a database administrator's incorrect stamp.
 
-**Implementation gate:** the real `backend/jarvis.db` remains at the old head.
-Do not start this new application against it or migrate it in this gate.
-The real migration requires the separately reviewed rollout gate. All tests
-and UI verification use explicitly named disposable databases.
+**Implementation gate (historical, implementation-time state):** at that time
+the real `backend/jarvis.db` remained at the old head. The
+application was not started against it and it was not migrated in that gate.
+The real migration required the separately reviewed rollout gate. All tests
+and UI verification used explicitly named disposable databases.
+
+**Current accepted state:** the real DB migration gate subsequently PASSED.
+The current real `backend/jarvis.db` revision is `9d0e1f2a3b4c`. The real
+Memory CRUD smoke PASSED, and the final test memory was deleted (0 rows).
 
 This is a local single-user feature using the existing deployment boundary.
 It adds no multi-user isolation or public deployment authentication. Automatic

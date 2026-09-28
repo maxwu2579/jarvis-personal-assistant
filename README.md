@@ -14,10 +14,14 @@
   pragma 已在连接时启用（CASCADE 生效）；
 - **可选 PostgreSQL**：Phase 5A 起提供双方言支持（集中式方言抽象，见下文
   「Phase 5A」章节），设置 `DATABASE_URL=postgresql+psycopg://…` 并执行
-  Alembic 迁移即可切换；已用真实 PostgreSQL 16 集成验证（迁移链、partial
-  unique、TIMESTAMPTZ、FK CASCADE、ILIKE 回退检索）；
+  Alembic 迁移即可切换；PostgreSQL / pgvector 兼容路径已存在。早期阶段
+  （Phase 5A 起的若干阶段）曾用真实 PostgreSQL 完成集成验证（迁移链、partial unique、
+  TIMESTAMPTZ、FK CASCADE、ILIKE 回退检索、pgvector）。**当前 Phase 10A
+  验收 baseline 未对完整当前迁移链做真实 PostgreSQL 集成验证
+  （REAL POSTGRESQL CURRENT BASELINE: NOT VERIFIED）**；离线 / 契约兼容
+  不等于当前真实 PostgreSQL 验证。当前主要真实数据库为 SQLite；
 - **检索诚实边界**：SQLite 用 FTS5；PostgreSQL 用**参数绑定 ILIKE 回退**
-  （不是 pgvector、也不是 PostgreSQL FTS）；Phase 5B 将实现 pgvector；
+  （不是 PostgreSQL FTS）；向量检索在 PG 路径使用 pgvector（Phase 5B 已实现，见下文）；
 - **投递语义**：实现 at-least-once + 去重（唯一约束），**未证明分布式 exactly-once**，
   不承诺在分布式环境下恰好一次。
 
@@ -217,7 +221,8 @@ py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements-dev.txt
 
-# 启动（首次启动自动创建 SQLite 表；API 文档见 http://localhost:8000/docs）
+# 先执行迁移（启动不会建表；见「数据库初始化」），再启动（API 文档见 http://localhost:8000/docs）
+alembic upgrade head
 uvicorn app.main:app --reload
 
 # ---- 2. 前端（另开一个终端）----
@@ -405,8 +410,8 @@ UPLOADED → PROCESSING → READY
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m alembic upgrade head   # head = 4C：documents / document_chunks /
-                                                     # chunk_embeddings / rag_answers
+.\.venv\Scripts\python.exe -m alembic upgrade head   # 升级到迁移链唯一 head（含 documents / document_chunks /
+                                                     # chunk_embeddings / rag_answers 等）
                                                      # SQLite 分支额外建 FTS5 虚拟表，PG 分支不建
 ```
 
@@ -1172,11 +1177,11 @@ LLM_TIMEOUT_SECONDS=30
 
 本地无 Key 演示：`LLM_PROVIDER=fake`（FakeLLMProvider，不发任何网络请求）。
 
-### DeepSeek 接入（Phase 4 前置，已实现 / 待真实 Key 验证）
+### DeepSeek 接入（已实现 / 真实 Provider 已验证）
 
-状态诚实说明：DeepSeek Provider 已实现并有完整离线测试覆盖，**尚未用真实
-Key 联网验证**（本机未配置 RUN_DEEPSEEK_SMOKE=1）。只有配置真实 Key 并运行
-冒烟测试后才能确认真实调用，详见下文「真实 DeepSeek 冒烟」。
+状态说明：DeepSeek Provider 已实现并有完整离线测试覆盖；已用真实 Provider
+完成 Action Proposal 验证（结构化输出兼容问题已修复）。自动化测试默认不联网，
+冒烟测试仍需显式开启，详见下文「真实 DeepSeek 冒烟」。
 
 ```powershell
 # 根目录 .env 示例（DeepSeek）
@@ -1234,25 +1239,35 @@ curl.exe -X POST http://localhost:8000/api/conversations/1/task-proposals -H "Co
 ## 当前未实现的功能（明确不做 / 不冒充）
 
 - **外部通知渠道** — 邮件/短信/微信/系统通知未实现，仅应用内通知；
-- **Calendar / 日历集成** — 未实现；
+- **其它日历提供方** — 未实现；仅支持 Microsoft Outlook 日历（Graph：读取 +
+  经预览 / 显式确认的事件创建）；
 - **扫描版 PDF / OCR / 图片理解** — 未实现；`.pdf` 仅支持文本型（加密 PDF
   明确失败，扫描版提取为空文本）；
-- **神经语义 embedding / pgvector** — 未实现。当前向量为 LocalHash 词汇
-  向量（确定性、零网络），只度量字面词汇重合；真正的语义 embedding 需要
-  外部模型（如 OpenAI text-embedding / BGE / M3E），尚未接入
-  （EmbeddingProvider 抽象已就绪，换 provider 不换服务）。PostgreSQL
-  可移植性基础已就绪（Phase 5A），pgvector 属 Phase 5B；
+- **默认神经语义 embedding** — 未启用。默认向量为 LocalHash 词汇
+  向量（确定性、零网络），只度量字面词汇重合；可选 `openai` embedding
+  provider 已实现（Phase 5C），但尚未做真实在线验证。pgvector 已在
+  Phase 5B 实现（仅 PostgreSQL 路径）；
 - **PostgreSQL FTS** — 未实现。PG 分支用参数绑定 ILIKE 回退（诚实替代，
   非全文索引），Phase 5B 以 pgvector 提供真实向量检索；
 - **文档重新处理端点** — 未实现（`FAILED` 文档可删除重传）；检索索引提供
   reindex 端点（`POST /api/retrieval/reindex/{id}`）；
 - **流式解压限额** — ZIP bomb 防御基于中央目录声明值，不做流式解压限额；
-- **多 Agent / 任意代码执行** — 未实现；模型输出仅限 `create_task_draft` 白名单，
+- **多 Agent / 任意代码执行** — 未实现；模型输出仅限固定白名单（`create_task_draft`；
+  Action Proposal：`create_task` / `create_task_with_reminder` / `create_calendar_event`），
   无 eval/exec/反射/任意函数名；
 - **认证 / 用户体系** — 未实现（无任何鉴权逻辑）；
 - 任务删除、编辑标题/描述、对话删除、建议拒绝（REJECTED）路径 — 不在当前范围。
 
 ## 下一阶段计划
+
+**当前状态**（权威当前工程状态见 [`JARVIS_ENGINEERING_HANDOFF.md`](JARVIS_ENGINEERING_HANDOFF.md)）：
+
+- 已实现：Outlook Calendar 读取；经预览 / 显式确认的单个定时事件创建；
+  Personal Memory（Phase 10A，手动 CRUD）。
+- 当前下一候选：**Phase 10B — Explicit Memory Proposal & Confirmation**，
+  **NOT STARTED / NOT AUTHORIZED**（未实现）。
+
+**历史计划（Phase 5C 时期记录，部分已过时，例如 Calendar 已接入）**：
 
 1. **真实 OpenAI 在线 smoke（Phase 5C 唯一未完成验证）**：配置真实
    `EMBEDDING_API_KEY`（环境注入）+ `EMBEDDING_PROVIDER=openai` +
