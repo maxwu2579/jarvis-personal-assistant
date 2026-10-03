@@ -87,3 +87,8 @@ This is a local single-user feature using the existing deployment boundary.
 It adds no multi-user isolation or public deployment authentication. Automatic
 extraction, proposals, context injection, vectors, planning and Phase 10B are
 not implemented.
+
+**Phase 10B note (implemented, not closed):** explicit natural-language proposals
+with confirmation now exist; see [`phase10b-memory-proposals.md`](phase10b-memory-proposals.md).
+`source_type` may now also be `user_confirmed`, and a manual update always resets
+it to `manual`. The Phase 10A manual CRUD contract above is otherwise unchanged.

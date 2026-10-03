@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, createMemory, deleteMemory, getMemory, listMemories, updateMemory } from '../../api'
-import type { MemoryCategory, MemoryScalar, MemoryValue, PersonalMemory } from '../../types'
+import type { MemoryCategory, MemoryScalar, MemorySourceType, MemoryValue, PersonalMemory } from '../../types'
+import MemoryProposalSection, { type MemoryProposalHandle } from './MemoryProposalSection'
 
 const categories: Record<MemoryCategory, string> = { preference: '偏好', stable_fact: '稳定背景', constraint: '固定限制' }
+const sources: Record<MemorySourceType, string> = { manual: '手动', user_confirmed: '用户确认' }
 type ValueType = 'text' | 'number' | 'boolean' | 'list' | 'object'
 type Cell = { name: string; type: 'text' | 'number' | 'boolean'; text: string }
 const blankCell = (): Cell => ({ name: '', type: 'text', text: '' })
@@ -35,6 +37,7 @@ export default function MemoryPanel() {
   const sequence = useRef(0)
   const mounted = useRef(true)
   const mutation = useRef(false)
+  const proposalSection = useRef<MemoryProposalHandle>(null)
 
   const refresh = useCallback(async () => {
     const seq = ++sequence.current
@@ -54,6 +57,7 @@ export default function MemoryPanel() {
     setEditing(null); setCategory('preference'); setKey(''); setType('text'); setCells([blankCell()]); setConflict(false)
   }
   function edit(item: PersonalMemory) {
+    proposalSection.current?.discard()  // entering manual edit cancels a pending proposal first
     setEditing(item); setCategory(item.category); setKey(item.key); setConflict(false); setError('')
     const value = item.value
     if (Array.isArray(value)) { setType('list'); setCells(value.map(v => cellFrom(v))) }
@@ -87,6 +91,7 @@ export default function MemoryPanel() {
     <p>保存相对稳定的偏好、个人背景和固定限制，例如「通常晚上学习」或「喜欢 45 分钟学习时段」。目前仅在此处管理，不会自动加入对话。</p>
     <p className="form-hint">任务是否完成请查看任务；提醒是否发送请查看提醒；会议时间以 Microsoft 日历为准；执行结果和文档内容请查看对应页面。</p>
     <p className="form-hint">请勿保存密码、API 密钥或验证码。</p>
+    <MemoryProposalSection ref={proposalSection} disabled={busy} onApplied={refresh} />
     {error && <p className="banner banner--error" role="alert">{error}</p>}
     {notice && <p className="banner banner--success" role="status">{notice}</p>}
     <form className="task-form memory-form" onSubmit={e => {
@@ -127,10 +132,10 @@ export default function MemoryPanel() {
     </form>
     <div className="memory-actions"><label>筛选类别<select disabled={busy} value={filter} onChange={e => setFilter(e.target.value as MemoryCategory | '')}><option value="">全部</option>{Object.entries(categories).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label><button type="button" className="btn" disabled={busy || loading} onClick={() => void refresh()}>刷新列表</button></div>
     {loading ? <p role="status">读取记忆中…</p> : items.length === 0 ? <p>暂无记忆。可在上方明确保存一条。</p> : <ul className="memory-list">{items.map(item => <li className="task-form" key={item.id}>
-      <h3>{item.key}</h3><p>{categories[item.category]} · 来源：手动（{item.source_type}） · 版本 {item.version}</p>
+      <h3>{item.key}</h3><p>{categories[item.category]} · 来源：{sources[item.source_type] ?? item.source_type}（{item.source_type}） · 版本 {item.version}</p>
       <pre>{typeof item.value === 'string' ? item.value : JSON.stringify(item.value, null, 2)}</pre>
       <p className="form-hint">更新于 <time dateTime={item.updated_at}>{new Date(item.updated_at).toLocaleString()}</time></p>
-      <div className="memory-actions"><button type="button" className="btn" disabled={busy} onClick={() => edit(item)}>编辑 {item.key}</button><button type="button" className="btn" disabled={busy} onClick={() => setDeleting(item)}>删除 {item.key}</button></div>
+      <div className="memory-actions"><button type="button" className="btn" disabled={busy} onClick={() => edit(item)}>编辑 {item.key}</button><button type="button" className="btn" disabled={busy} onClick={() => { proposalSection.current?.discard(); setDeleting(item) }}>删除 {item.key}</button></div>
     </li>)}</ul>}
     {deleting && <div className="memory-confirm" role="alertdialog" aria-modal="false" aria-labelledby="memory-delete-title" aria-describedby="memory-delete-description">
       <h3 id="memory-delete-title">删除 {deleting.key}？</h3>

@@ -14,7 +14,7 @@ class PersonalMemory(Base):
     __table_args__ = (
         UniqueConstraint("key", name="uq_personal_memories_key"),
         CheckConstraint("category IN ('preference','stable_fact','constraint')", name="ck_memory_category"),
-        CheckConstraint("source_type = 'manual'", name="ck_memory_source"),
+        CheckConstraint("source_type IN ('manual','user_confirmed')", name="ck_memory_source"),
         CheckConstraint("version >= 1", name="ck_memory_version"),
         Index("ix_personal_memories_category_key", "category", "key"),
         {"sqlite_autoincrement": True},

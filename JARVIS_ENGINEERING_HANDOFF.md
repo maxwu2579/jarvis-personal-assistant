@@ -33,11 +33,10 @@
 | Phase 0–9 | COMPLETE / CLOSED |
 | Phase 9.5 — DB Lifecycle Hardening | COMPLETE / CLOSED |
 | Phase 10A — Minimal Personal Memory Foundation | COMPLETE / CLOSED |
-| Phase 10B | NOT STARTED |
+| Phase 10B — Explicit Memory Proposal & Confirmation | IMPLEMENTED（未提交）— 待 Luna QA / Real Provider Gate / Real DB Gate；**NOT CLOSED** |
 
-- Current open development phase: **NONE**
-- Next candidate: **Phase 10B — Explicit Memory Proposal & Confirmation**
-  - **NOT AUTHORIZED FOR IMPLEMENTATION**
+- Current open development phase: **Phase 10B**（实现完成，uncommitted，基于 `a6e1b8e`）
+- Phase 10B 规格：[`docs/phase10b-memory-proposals.md`](docs/phase10b-memory-proposals.md)
 
 ---
 
@@ -53,7 +52,7 @@
 | Retrieval / RAG | SQLite：FTS5/BM25 + LocalHash（非语义）+ RRF；PG：ILIKE 回退 + pgvector；RAG 后端分配引用标签 + allowlist 校验，证据不足弃权 | `/api/retrieval`、`/api/rag/ask` |
 | Execution Engine | Execution / Attempt / Step / Event、租约、重试、`run_at`、确认门 | `/api/executions`；`python -m app.services.execution_worker` |
 | Outlook Calendar | Microsoft Graph 读（calendarView）+ 经 Proposal/Confirm/Execution 的写 | `/api/calendar`（仅本地请求） |
-| Personal Memory | Phase 10A 手动 CRUD（见 §5） | `/api/memories`；前端「记忆」tab |
+| Personal Memory | Phase 10A 手动 CRUD（见 §5）；Phase 10B（未关闭）：记忆 tab 内显式自然语言提案 → 预览 → 显式确认 | `/api/memories`、`/api/memories/proposals`；前端「记忆」tab |
 
 健康检查：`/health`（liveness）、`/health/db`（readiness，只读核对 revision）、`/health/embedding`。
 
@@ -101,7 +100,15 @@ Action Proposal intent allowlist：`create_task`、`create_task_with_reminder`�
 Manual Memory UI / API → Create / Read / Update / Delete
 ```
 
-**当前不存在**：Natural Language → Memory write。
+**D. Personal Memory（Phase 10B，已实现、未关闭）**
+
+```
+记忆 tab 一句话 → 冻结 V1 语法（全匹配）→ 受约束 LLM candidate → strict schema
+→ 确定性策略 → 精确 key 查询 → Preview（进程内存，10 分钟）
+→ Explicit Confirm → Memory 变更 + receipt 单事务
+```
+
+仅记忆 tab 为入口；Chat / Action Proposal / RAG / Task / Calendar 不写 Memory。不使用 Execution、Worker 或 `action.confirm`。
 
 ---
 
@@ -111,7 +118,7 @@ Manual Memory UI / API → Create / Read / Update / Delete
 
 - Categories：`preference`、`stable_fact`、`constraint`（仅此三类）
 - Memory 性质：user-visible、editable、deletable、source-aware、version protected
-- `source_type`：当前仅 `manual`（服务端控制，客户端不可提供）
+- `source_type`：`manual`；Phase 10B（未关闭）新增 `user_confirmed`（确认的提案）。服务端控制，客户端 / LLM 不可提供；手动更新总是重置为 `manual`
 - value：bounded structured JSON（标量 / ≤64 标量列表 / ≤32 字段扁平对象；无 null、无嵌套；紧凑 JSON ≤ 4096 UTF-8 bytes）
 - key：1–80 ASCII，小写字母开头，`[a-z0-9_]`；单用户内全局唯一（重复 409 `MEMORY_KEY_CONFLICT`）
 - version：optimistic concurrency（`expected_version` 数据库谓词 CAS；陈旧 409 `MEMORY_VERSION_CONFLICT`；无自动重试、无静默覆盖）
@@ -120,8 +127,8 @@ Manual Memory UI / API → Create / Read / Update / Delete
 
 明确**不存在**：
 
-- NO automatic memory
-- NO LLM extraction
+- NO automatic memory（Phase 10B 只有显式请求 + 显式确认；无静默写入）
+- NO free-form LLM extraction（Phase 10B 只支持 3 个 canonical key 与冻结语法）
 - NO context injection
 - NO semantic / vector memory
 - NO Planning integration
@@ -148,9 +155,10 @@ Memory **不得**复制其它 domain 的 mutable operational truth（例如「�
 - Production schema authority：**ALEMBIC ONLY**
 - Production startup：NO `create_all`、NO automatic upgrade、NO automatic stamp、NO automatic repair
 - Startup：**READ / VERIFY ONLY**（revision 必须等于迁移链唯一 head，否则 fail closed；SQLite 文件不存在时在首次连接前拒绝启动）
-- Current unique Alembic head：**`9d0e1f2a3b4c`**（`personal_memories`，down_revision `8c9d0e1f2a3b4`；迁移链线性，共 13 个 revision）
+- Accepted head（baseline `a6e1b8e`）：`9d0e1f2a3b4c`
+- Working-tree head（Phase 10B，未提交）：**`ae1f2a3b4c5d`**（`user_confirmed` source + `memory_confirmation_receipts`；down_revision `9d0e1f2a3b4c`；迁移链线性，共 14 个 revision）
 - Current real SQLite DB：`backend/jarvis.db`
-  - Alembic revision：`9d0e1f2a3b4c`
+  - Alembic revision：`9d0e1f2a3b4c`（**尚未**迁移到 `ae1f2a3b4c5d`；Real DB Gate 未授权。在此之前，用 Phase 10B 代码启动并指向真实库会按设计 fail closed）
   - `personal_memories`：present
   - current Memory rows：0
   - 以上状态于 2026-09-28 以只读方式（`mode=ro`）复核。这是最近验收状态，不是永久规格；DB 二进制哈希不作为规格记录。
@@ -277,6 +285,21 @@ Internal（`INTERNAL_EXECUTION_TYPES`，公共 API 视为不存在 → 404）：
 
 Skipped 测试均为门控（真实 PostgreSQL / 真实外部服务），默认跳过而非伪造通过。
 
+### Phase 10B — Claude first-pass（2026-09-29，含 Astra 裁定修正，uncommitted working tree on `a6e1b8e`）
+
+这是实现者首轮结果，**不是**已接受 baseline；Luna 独立 QA 尚未执行。
+
+| 项 | 结果 |
+| --- | --- |
+| Full pytest | 1365 passed, 37 skipped, 1402 collected, 0 failed, 0 errors |
+| Phase 10B targeted | 231 PASS（grammar 94 + API/policy/transaction 132 + migration 5） |
+| Phase 10A regression | 63 + 3 PASS；schema lifecycle 13 PASS |
+| Frontend lint / build | PASS / PASS |
+| Memory UI interaction | PASS（disposable DB + fake provider harness） |
+| Real PostgreSQL | NOT RUN（门控跳过） |
+| Real Provider Gate | NOT RUN（未授权） |
+| Real DB Gate | NOT RUN（未授权；真实库仍为 `9d0e1f2a3b4c`） |
+
 ---
 
 ## 14. Development Workflow（三方）
@@ -337,6 +360,7 @@ Skipped 测试均为门控（真实 PostgreSQL / 真实外部服务），默认�
 | HTTP transport request-count observability | BEFORE MULTI-WRITE PLANNING EXECUTION |
 | single-user local security boundary | ONLY IF DEPLOYMENT CHANGES（full authentication / multi-user isolation） |
 | real PostgreSQL integration not verified（本 baseline） | ONLY IF DEPLOYMENT CHANGES（real PostgreSQL deployment validation） |
+| SQLite `value_json`（JSON → NUMERIC affinity）会丢失历史手动值的 float/int 类型（`45.0` 读回 `45`）；Phase 10B 比较实际读回值，无法恢复已丢失的类型（Astra：非阻塞既有限制） | 未来存储模型考虑（未修复） |
 
 按阶段汇总：
 
@@ -346,9 +370,9 @@ Skipped 测试均为门控（真实 PostgreSQL / 真实外部服务），默认�
 
 ---
 
-## 18. Next Planned Architecture — PLANNED / NOT IMPLEMENTED
+## 18. Phase 10B Architecture — FROZEN / IMPLEMENTED（uncommitted）/ NOT CLOSED
 
-**Phase 10B：Explicit Memory Proposal & Confirmation**（Astra 当前推荐方向，未授权）
+**Phase 10B：Explicit Memory Proposal & Confirmation**（Astra 已冻结规格；Claude 已实现，待 Luna QA 与外部 Gate。实现细节见 `docs/phase10b-memory-proposals.md`）
 
 ```
 Natural Language
@@ -369,7 +393,7 @@ Natural Language
 
 | Phase | 方向 |
 | --- | --- |
-| 10B | Explicit Memory Proposal |
+| 10B | Explicit Memory Proposal（已实现，未关闭） |
 | 10C | Bounded Memory Selection / Transparent Context Use |
 | 11A | Read-only Planning V1 |
 | 11B | Confirmed Planning Execution |

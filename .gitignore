@@ -35,4 +35,7 @@ docs/learning/*.pdf
 .DS_Store
 Thumbs.db
 .claude/
+
+# Downloaded third-party examples are not part of the JARVIS application.
+/apisix-docker/
 /-w

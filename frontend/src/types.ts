@@ -542,6 +542,40 @@ export type MemoryCategory = 'preference' | 'stable_fact' | 'constraint'
 export type MemoryScalar = string | number | boolean
 export type MemoryValue = MemoryScalar | MemoryScalar[] | Record<string, MemoryScalar>
 export interface MemoryInput { category: MemoryCategory; key: string; value: MemoryValue }
+// manual = direct CRUD; user_confirmed = Phase 10B proposal explicitly confirmed. Server-set only.
+export type MemorySourceType = 'manual' | 'user_confirmed'
 export interface PersonalMemory extends MemoryInput {
-  id: number; source_type: 'manual'; version: number; created_at: string; updated_at: string
+  id: number; source_type: MemorySourceType; version: number; created_at: string; updated_at: string
 }
+
+export type MemoryProposalStatus = 'READY' | 'ALREADY_SAVED' | 'NEEDS_CLARIFICATION' | 'UNSUPPORTED' | 'INVALID'
+export type MemoryCanonicalValue = string | number | string[]
+export interface MemoryProposal {
+  proposal_id: string
+  operation: 'CREATE' | 'UPDATE'
+  category: MemoryCategory
+  key: string
+  old_value: MemoryCanonicalValue | null
+  new_value: MemoryCanonicalValue
+  target_memory_id: number | null
+  expected_version: number | null
+  source_type: 'user_confirmed'
+  expires_at: string
+}
+export interface MemoryProposalResponse {
+  status: MemoryProposalStatus
+  code: string
+  message: string
+  proposal: MemoryProposal | null
+  existing_memory: PersonalMemory | null
+}
+export interface MemoryConfirmResult {
+  status: 'APPLIED'
+  proposal_id: string
+  operation: 'CREATE' | 'UPDATE'
+  memory_id: number
+  applied_version: number
+  confirmed_at: string
+  replayed: boolean
+}
+export interface MemoryCancelResult { status: 'CANCELLED'; proposal_id: string }

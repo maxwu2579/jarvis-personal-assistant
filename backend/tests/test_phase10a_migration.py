@@ -33,7 +33,7 @@ def config(path):
 
 def historical_snapshot(path):
     with sqlite3.connect(path) as db:
-        return db.execute("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND tbl_name != 'personal_memories' ORDER BY type,name").fetchall()
+        return db.execute("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND tbl_name NOT IN ('personal_memories', 'memory_confirmation_receipts') ORDER BY type,name").fetchall()
 
 
 def test_existing_upgrade_fail_closed_startup_and_downgrade(tmp_path, monkeypatch):
@@ -74,7 +74,7 @@ def test_fresh_migration_and_model_match(tmp_path, monkeypatch):
     with TestClient(main.app):
         pass
     with engine.connect() as conn:
-        assert MigrationContext.configure(conn).get_current_heads() == (NEW,)
+        assert MigrationContext.configure(conn).get_current_heads() == (get_alembic_script_directory().get_current_head(),)
         from alembic.autogenerate import compare_metadata
         metadata = sa.MetaData()
         PersonalMemory.__table__.to_metadata(metadata)
@@ -85,7 +85,7 @@ def test_fresh_migration_and_model_match(tmp_path, monkeypatch):
 
 def test_postgres_offline_migration_and_model_contract():
     script = get_alembic_script_directory()
-    assert script.get_heads() == [NEW]
+    assert len(script.get_heads()) == 1  # Phase 10B extends the chain after NEW
     revision = script.get_revision(NEW)
     assert revision.down_revision == OLD
     output = io.StringIO()

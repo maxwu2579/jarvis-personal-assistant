@@ -10,6 +10,9 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_serial
 from app.schemas.common import serialize_utc
 
 MemoryCategory = Literal["preference", "stable_fact", "constraint"]
+# manual = direct CRUD; user_confirmed = Phase 10B proposal explicitly confirmed.
+# Server-controlled only: no request schema accepts it.
+MemorySourceType = Literal["manual", "user_confirmed"]
 MemoryKey = Annotated[str, Field(min_length=1, max_length=80, pattern=r"^[a-z][a-z0-9_]{0,79}$")]
 Scalar = str | int | float | bool
 
@@ -59,7 +62,7 @@ class MemoryOut(BaseModel):
     category: MemoryCategory
     key: str
     value: MemoryValue
-    source_type: Literal["manual"]
+    source_type: MemorySourceType
     version: int
     created_at: datetime
     updated_at: datetime

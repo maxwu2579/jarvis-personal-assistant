@@ -1,6 +1,9 @@
 import type {
+  MemoryCancelResult,
   MemoryCategory,
+  MemoryConfirmResult,
   MemoryInput,
+  MemoryProposalResponse,
   PersonalMemory,
   CalendarConnection,
   CalendarMetadata,
@@ -46,6 +49,18 @@ export const updateMemory = (id: number, payload: MemoryInput, expectedVersion: 
     method: 'PUT', body: JSON.stringify({ ...payload, expected_version: expectedVersion }),
   })
 export const deleteMemory = (id: number) => request<{ deleted: boolean }>(`/api/memories/${id}`, { method: 'DELETE' })
+// Phase 10B: explicit natural-language proposal → preview → confirm. Pending proposals
+// live only in backend RAM; nothing is stored in the browser.
+export const generateMemoryProposal = (content: string) =>
+  request<MemoryProposalResponse>('/api/memories/proposals', { method: 'POST', body: JSON.stringify({ content }) })
+export const confirmMemoryProposal = (proposalId: string) =>
+  request<MemoryConfirmResult>(`/api/memories/proposals/${encodeURIComponent(proposalId)}/confirm`, {
+    method: 'POST', body: '{}',
+  })
+export const cancelMemoryProposal = (proposalId: string) =>
+  request<MemoryCancelResult | MemoryConfirmResult>(`/api/memories/proposals/${encodeURIComponent(proposalId)}`, {
+    method: 'DELETE',
+  })
 
 export const calendarConnectUrl = `${API_URL}/api/calendar/connect`
 export const calendarWriteAuthorizeUrl = `${API_URL}/api/calendar/authorize-write`

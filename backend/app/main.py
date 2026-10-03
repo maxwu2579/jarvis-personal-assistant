@@ -29,6 +29,8 @@ from app.api.reminders import router as reminders_router
 from app.api.retrieval import router as retrieval_router
 from app.api.tasks import router as tasks_router
 from app.api.memories import router as memories_router
+from app.api.memory_proposals import router as memory_proposals_router
+from app.services.memory_proposal_store import get_memory_proposal_store
 from app.services.memory_service import MemoryError
 from app.api.calendar import router as calendar_router, calendar_error_handler
 from app.integrations.calendar.errors import CalendarError
@@ -105,7 +107,13 @@ async def lifespan(_: FastAPI):
     # Alembic is the sole production schema authority. Startup is read-only and
     # fails closed when the configured database is not at the unique head.
     _verify_schema_ready()
-    yield
+    # Phase 10B: periodic (~30 s) expiry cleanup of in-RAM pending Memory proposals.
+    proposal_store = get_memory_proposal_store()
+    proposal_store.start_cleanup()
+    try:
+        yield
+    finally:
+        proposal_store.stop_cleanup()
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -311,6 +319,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 
 app.include_router(tasks_router)
+# Static /api/memories/proposals routes first, before /api/memories/{memory_id}.
+app.include_router(memory_proposals_router)
 app.include_router(memories_router)
 app.include_router(conversations_router)
 app.include_router(reminders_router)

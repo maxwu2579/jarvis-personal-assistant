@@ -22,9 +22,11 @@ from app.models.rag_audit import RagAnswer, RagAnswerStatus
 from app.models.reminder import Notification, NotificationType, Reminder, ReminderStatus
 from app.models.task import Task, TaskStatus
 from app.models.personal_memory import PersonalMemory
+from app.models.memory_receipt import MemoryConfirmationReceipt
 
 __all__ = [
     "PersonalMemory",
+    "MemoryConfirmationReceipt",
     "AttemptStatus",
     "ChunkEmbedding",
     "Conversation",
