@@ -33,12 +33,18 @@ from app.api.memory_proposals import router as memory_proposals_router
 from app.services.memory_proposal_store import get_memory_proposal_store
 from app.services.memory_service import MemoryError
 from app.api.calendar import router as calendar_router, calendar_error_handler
+from app.api.chat_privacy import (
+    NO_STORE,
+    ChatMessagesPrivacy,
+    is_messages_resource,
+    sanitized_validation_response,
+)
 from app.integrations.calendar.errors import CalendarError
 from app.integrations.calendar.security import CalendarCallbackPrivacy, secure_library_logging
 from app.core.config import settings
 from app.core.database import IS_SQLITE, engine, get_db
 from app.llm.base import LLMNotConfiguredError, LLMTimeoutError, LLMUpstreamError
-from app.services.chat_service import ConversationNotFoundError
+from app.services.chat_service import ChatPersistenceError, ConversationNotFoundError
 from app.services.document_errors import DOCUMENT_ERROR_STATUS, DocumentError
 from app.services.execution_errors import (
     EXECUTION_ERROR_STATUS,
@@ -130,6 +136,8 @@ app.add_middleware(
 )
 app.add_middleware(CorrelationIdMiddleware)
 app.add_middleware(CalendarCallbackPrivacy)
+# Phase 10C：仅 messages 资源 —— 所有响应 Cache-Control: no-store。
+app.add_middleware(ChatMessagesPrivacy)
 app.add_exception_handler(CalendarError, calendar_error_handler)
 secure_library_logging()
 
@@ -144,8 +152,11 @@ def _format_validation_message(errors: list[dict]) -> str:
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_error_handler(_: Request, exc: RequestValidationError):
+async def validation_error_handler(request: Request, exc: RequestValidationError):
     """422 校验错误归一为统一错误结构（含 naive 时区、空白 title 等业务校验）。"""
+    if is_messages_resource(request.url.path):
+        # Phase 10C：仅 messages 资源使用固定脱敏文案，不回显被拒绝的值 / 字段名 / 请求体。
+        return sanitized_validation_response()
     return JSONResponse(
         status_code=422,
         content=_error_body("VALIDATION_ERROR", _format_validation_message(exc.errors())),
@@ -177,6 +188,15 @@ async def conversation_not_found_handler(_: Request, exc: ConversationNotFoundEr
         content=_error_body(
             "CONVERSATION_NOT_FOUND", f"Conversation {exc.conversation_id} does not exist"
         ),
+    )
+
+
+@app.exception_handler(ChatPersistenceError)
+async def chat_persistence_error_handler(_: Request, exc: ChatPersistenceError):
+    """Phase 10C：messages 资源的非 Operational 存储失败 → 固定 500，不含任何原始异常文本。"""
+    return JSONResponse(
+        status_code=500,
+        content=_error_body("CHAT_PERSISTENCE_FAILED", "Chat persistence failed"),
     )
 
 
@@ -311,10 +331,14 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     """
     logger.exception("Unhandled error: %s", exc)
     cid = _correlation_id(request)
+    headers = {"X-Request-ID": cid} if cid else {}
+    if is_messages_resource(request.url.path):
+        # Phase 10C：本 handler 的响应绕过中间件，这里补上 messages 资源的 no-store。
+        headers["Cache-Control"] = NO_STORE
     return JSONResponse(
         status_code=500,
         content=_error_body("INTERNAL_ERROR", "Internal server error"),
-        headers={"X-Request-ID": cid} if cid else None,
+        headers=headers or None,
     )
 
 

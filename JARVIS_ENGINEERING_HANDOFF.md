@@ -15,7 +15,8 @@
 | Branch | `main` |
 | Accepted baseline commit | `5b8d343dba31fde13c4c29018492e77675e7b2ea`（`feat: add minimal personal memory foundation`，2026-09-26） |
 | Phase 10B implementation checkpoint | `9040c83d9019e3a1d51000e4d0d7e8320f8c530a`（`feat: add explicit memory proposal and confirmation checkpoint`，2026-10-03） |
-| Phase 10B final checkpoint | `9040c83` 之上的下一个 commit：`chore: close phase 10b memory proposal validation`（2026-10-06；SHA 以 `git log` 为准，文件无法自引用）。Phase 10B 验收后，该 commit 为当前 accepted baseline |
+| Phase 10B final checkpoint | `9040c83` 之上的下一个 commit：`chore: close phase 10b memory proposal validation`（2026-10-06）：`1a9de59eb6060579b80592262eb7afc681fc97c3` |
+| Phase 10C final checkpoint | `1a9de59` 之上的下一个 commit：`feat: complete phase 10c selective memory context`（2026-10-06；SHA 以 `git log` 为准，文件无法自引用）。Phase 10C 验收后，该 commit 为当前 accepted baseline |
 | Current Python | 3.12.10（`backend\.venv`） |
 | Stack | Backend FastAPI + SQLAlchemy + Alembic（SQLite 默认 / PostgreSQL 可选）；Frontend React + TypeScript + Vite |
 
@@ -37,14 +38,22 @@
 | Phase 9.5 — DB Lifecycle Hardening | COMPLETE / CLOSED |
 | Phase 10A — Minimal Personal Memory Foundation | COMPLETE / CLOSED |
 | Phase 10B — Explicit Memory Proposal & Confirmation | **CLOSED / ACCEPTED**（Astra，2026-10-06） |
+| Phase 10C — Explicit Per-Request Personal Memory Use in Ordinary Chat | **CLOSED / ACCEPTED**（2026-10-06） |
 
-- Current open development phase: **无**。下一阶段 Phase 10C 仅可开始 planning，尚未授权实现（见 §19）。
+- Current open development phase: **无**。下一阶段尚未规划，也未授权（见 §19）。
+- Phase 10C 规格与验收记录：[`docs/specs/phase10c-frozen-spec.md`](docs/specs/phase10c-frozen-spec.md)
+- Phase 10C final gate state：
+  - Claude implementation / First-Pass Gate：**PASS**
+  - Luna Independent QA：**PASS**
+  - Architecture / Implementation Review：**PASS**
+  - Real Provider Gate：**NOT REQUIRED**
+  - Real DB Gate：**PASS**（真实库 `ae1f2a3b4c5d` → `b10c0d1e2f3a`，见 §7）
 - Phase 10B 规格与验收记录：[`docs/phase10b-memory-proposals.md`](docs/phase10b-memory-proposals.md)
 - Phase 10B final gate state：
   - Implementation / Regression：**PASS**
   - SDK 3.24 environment / privacy：**PASS**
   - Real Provider Gate：**PASS**（2026-10-05；deepseek / `deepseek-v4-flash`；授权 2 次真实业务调用，实际 2 次；SDK transport 重试 0 次）
-  - Real DB Gate：**PASS**（真实库现为 `ae1f2a3b4c5d`，见 §7）
+  - Real DB Gate：**PASS**（当时迁移到 `ae1f2a3b4c5d`；真实库此后已由 Phase 10C 迁移到 `b10c0d1e2f3a`，见 §7）
 
 ---
 
@@ -60,7 +69,7 @@
 | Retrieval / RAG | SQLite：FTS5/BM25 + LocalHash（非语义）+ RRF；PG：ILIKE 回退 + pgvector；RAG 后端分配引用标签 + allowlist 校验，证据不足弃权 | `/api/retrieval`、`/api/rag/ask` |
 | Execution Engine | Execution / Attempt / Step / Event、租约、重试、`run_at`、确认门 | `/api/executions`；`python -m app.services.execution_worker` |
 | Outlook Calendar | Microsoft Graph 读（calendarView）+ 经 Proposal/Confirm/Execution 的写 | `/api/calendar`（仅本地请求） |
-| Personal Memory | Phase 10A 手动 CRUD（见 §5）；Phase 10B：记忆 tab 内显式自然语言提案 → 预览 → 显式确认 | `/api/memories`、`/api/memories/proposals`；前端「记忆」tab |
+| Personal Memory | Phase 10A 手动 CRUD（见 §5）；Phase 10B：记忆 tab 内显式自然语言提案 → 预览 → 显式确认；Phase 10C：普通 Chat 可在单次发送中只读使用显式勾选的已保存偏好（见 §4 E、§5） | `/api/memories`、`/api/memories/proposals`；前端「记忆」tab；`POST /api/conversations/{id}/messages` 的可选 `memory_keys` |
 
 健康检查：`/health`（liveness）、`/health/db`（readiness，只读核对 revision）、`/health/embedding`。
 
@@ -118,6 +127,27 @@ Manual Memory UI / API → Create / Read / Update / Delete
 
 仅记忆 tab 为入口；Chat / Action Proposal / RAG / Task / Calendar 不写 Memory。不使用 Execution、Worker 或 `action.confirm`。
 
+**E. 普通 Chat 单次使用已保存偏好（Phase 10C）**
+
+```
+普通 Chat 勾选（每次发送，默认不勾选）→ USER 先落库 → 过滤后的历史
+→ Memory 快照（独立短读会话，精确 key，严格校验）→ 固定 policy + 数据消息 + 历史
+→ Provider（应用层至多 1 次生成）→ ASSISTANT 回复 + 来源标记 单事务
+```
+
+Phase 10C contract（详见 `docs/specs/phase10c-frozen-spec.md`）：
+
+- 能力：普通 Chat 可在**单次请求**中使用用户**显式勾选**的已保存偏好。
+- 选择：最多 3 个 canonical key（`preferred_study_time`、`preferred_session_duration`、`usual_available_days`）；仅本次发送有效；默认不勾选；不持久化（无全局开关、无 localStorage / sessionStorage / URL）。
+- Memory 使用：**READ-ONLY**。`manual` 与 `user_confirmed` 同等可用；值必须是合法 canonical 值，否则整条省略（不强制转换、不修复）。
+- Automatic extraction：**NO**；Automatic Memory mutation：**NO**；Vector / semantic Memory：**NO**；relevance LLM：**NO**。
+- API：无新端点。`POST /api/conversations/{id}/messages` 新增可选 `memory_keys`；`MessageOut` 新增 `memory_context_applied`；`ChatExchangeOut` 新增 `memory_context`（`status` ∈ `disabled` / `applied` / `empty` / `unavailable`，`keys` 为实际提供的 key）。该 messages 资源的所有响应 `Cache-Control: no-store`，422 使用固定脱敏文案。
+- 来源标记：`messages.memory_context_applied` 仅在「成功提供了非空偏好 payload 后生成的普通 Chat ASSISTANT 回复」上为 true；RAG / 任务建议等其他写入方始终为 false。
+- **被标记的历史 Chat 回复在本地仍然可见（`GET messages` 返回完整记录），但被排除在之后所有自动 Provider 历史之外**——包括普通 Chat、任务建议与行动提案（统一经 `app/llm/messages.py`）。更新或删除 Memory 后同样如此；删除 Memory 不会删除历史回复。
+- Fail-closed：只有来源标记被证明为合法存储的 false 的历史行才进入 Provider 历史；true / NULL / 损坏的原始值一律排除（ORM 解码出的 False 不足为证，另有数据库派生的有效性属性）。
+- 预算：确定性的 byte-token accounting units（≤ 1024），**不是** Provider 原生 token。
+- Real Provider Gate：NOT REQUIRED；Real DB Gate：PASS。
+
 ---
 
 ## 5. Memory Contract（Phase 10A 正式 contract）
@@ -137,7 +167,8 @@ Manual Memory UI / API → Create / Read / Update / Delete
 
 - NO automatic memory（Phase 10B 只有显式请求 + 显式确认；无静默写入）
 - NO free-form LLM extraction（Phase 10B 只支持 3 个 canonical key 与冻结语法）
-- NO context injection
+- NO automatic / implicit context injection（Phase 10C 只有显式、单次、只读的使用，见下）
+- NO automatic Memory extraction or mutation from Chat（普通 Chat 对 Memory 只读）
 - NO semantic / vector memory
 - NO Planning integration
 
@@ -163,19 +194,24 @@ Memory **不得**复制其它 domain 的 mutable operational truth（例如「�
 - Production schema authority：**ALEMBIC ONLY**
 - Production startup：NO `create_all`、NO automatic upgrade、NO automatic stamp、NO automatic repair
 - Startup：**READ / VERIFY ONLY**（revision 必须等于迁移链唯一 head，否则 fail closed；SQLite 文件不存在时在首次连接前拒绝启动）
-- Accepted head（Phase 10B）：**`ae1f2a3b4c5d`**（`user_confirmed` source + `memory_confirmation_receipts`；down_revision `9d0e1f2a3b4c`；迁移链线性，共 14 个 revision）
-- 上一个 accepted head（Phase 10A）：`9d0e1f2a3b4c`
+- Accepted head（Phase 10C）：**`b10c0d1e2f3a`**（仅新增 `messages.memory_context_applied`：Boolean、NOT NULL、server default false；down_revision `ae1f2a3b4c5d`；迁移链线性，共 15 个 revision）
+- 此前的 accepted head：Phase 10B `ae1f2a3b4c5d`（`user_confirmed` source + `memory_confirmation_receipts`）；Phase 10A `9d0e1f2a3b4c`
 - Current real SQLite DB：`backend/jarvis.db`
-  - Alembic revision：**`ae1f2a3b4c5d`**（Real DB Gate PASS；已由显式授权的 migration gate 从 `9d0e1f2a3b4c` 迁移）
-  - 当前预期的 Phase 10B 持久审计状态：
+  - Alembic revision：**`b10c0d1e2f3a`**（Phase 10C Real DB Gate PASS，2026-10-06；由显式授权的 `alembic upgrade head` 从 `ae1f2a3b4c5d` 迁移。此前 Phase 10B gate 已从 `9d0e1f2a3b4c` 迁移到 `ae1f2a3b4c5d`）
+  - 真实库现在**要求** Phase 10C 的代码与 schema：早于 Phase 10C final checkpoint 的源码指向该库会按设计 fail closed。
+  - Phase 10C gate 结束时的已接受状态：`conversations` = 1，`messages` = 0，`foreign_key_check` clean，无 WAL / SHM / journal sidecar。
+  - 当前预期的 Phase 10B 持久审计状态（Phase 10C 迁移未改变）：
     - `personal_memories` rows = **0**
     - `memory_confirmation_receipts` rows = **2**（`CREATE` 与 `UPDATE` 各一条，均为 `APPLIED`）
     - `personal_memories` 的 `sqlite_sequence`（AUTOINCREMENT high-water）= **2**
     - SQLite `quick_check`：`ok`
   - **这 2 条 receipt 是有意保留的历史审计记录**（Real DB Gate 的确认回执；receipt 无外键，按设计在 Memory 删除后继续存在）。**不得**仅为了让数据库「看起来干净」而删除它们；high-water = 2 同理不得重置。
-  - Real DB Gate 结束时的 DB SHA-256（gate 时点证据，**不是**规格；此后任何合法写入都会改变它）：`6594741e55809557a7133dff5f9477cb0562bb3e4c9f4199c4e797bfa057c842`
-  - Real DB Gate 的备份 / 证据目录在仓库外：`C:\Users\25795\JARVIS-DB-Gate-Backups\phase10b-20261005T101920Z`。**不得**复制进仓库。
-  - 以上状态于 2026-10-06 以只读方式（`mode=ro`）复核，与上述记录一致。这是最近验收状态，不是永久规格。
+  - Phase 10C Real DB Gate 结束时的 DB SHA-256（gate 时点证据，**不是**规格；此后任何合法写入都会改变它）：`20e29462c03cdfbf2af0c69bb2a51de82cfa40e4b13fd4d31d23705603a84c81`
+    - 历史：Phase 10B Real DB Gate 结束时为 `6594741e55809557a7133dff5f9477cb0562bb3e4c9f4199c4e797bfa057c842`（即 Phase 10C 迁移前的哈希）。
+  - Real DB Gate 的备份 / 证据目录均在仓库外，**不得**复制进仓库：
+    - Phase 10C：`C:\Users\25795\JARVIS-DB-Gate-Backups\phase10c-20261006T035423Z\`（`gate-report.json`、迁移前备份 `jarvis-pre10c-20261006T035423Z.sqlite.bak`、`gate.py`、`alembic-upgrade.log`）
+    - Phase 10B：`C:\Users\25795\JARVIS-DB-Gate-Backups\phase10b-20261005T101920Z`
+  - 以上状态于 2026-10-06（Phase 10C final checkpoint 前）以只读方式（`mode=ro`）复核，与上述记录一致。这是最近验收状态，不是永久规格。
 - 测试从不接触真实 `jarvis.db`：测试使用 disposable SQLite，并显式执行 `alembic upgrade head`；测试中的隔离 `create_all` 仅为脚手架，不属于 production startup。
 
 ---
@@ -362,6 +398,23 @@ Skipped 测试均为门控（真实 PostgreSQL / 真实外部服务），默认�
 
 37 个 skipped 均为门控（真实 PostgreSQL / 真实 Provider 冒烟），默认跳过而非伪造通过。
 
+### Phase 10C — FINAL ACCEPTED（2026-10-06）
+
+| 项 | 最终结果 |
+| --- | --- |
+| Phase 10C | **CLOSED / ACCEPTED** |
+| Claude implementation / First-Pass Gate | PASS / PASS |
+| Final backend regression（final source） | **1682 collected：1645 passed，37 skipped，0 failed，0 errors，exit code 0** |
+| Frontend | build PASS；lint PASS；browser QA PASS（Claude 50/50，headless Chrome，disposable backend + fake provider，loopback） |
+| Luna Independent QA | **PASS**（Luna 独立针对性证据：236 个 Phase 10C / SDK 测试 + 28 个历史测试，全部 PASS；由 Luna 报告，非本文件作者复跑） |
+| Architecture / Implementation Review | PASS |
+| Real Provider Gate | **NOT REQUIRED**（离线 transport 拦截为验收证据；未调用任何真实 Provider） |
+| Real DB Gate | **PASS**（`ae1f2a3b4c5d` → `b10c0d1e2f3a`；迁移前外部备份逐字节校验；数据 / FK / 索引 / sequence 保留；只读 readiness 通过） |
+| Real PostgreSQL | NOT RUN（仅离线 DDL / portability；未执行 live PostgreSQL gate） |
+
+Runtime：Python 3.12.10；openai 3.24.0；httpx2 2.13.1；httpcore2 2.13.1；SQLAlchemy 2.1.3；Node v22.23.2 / npm 10.9.8（`npm ci`，manifest 与 lockfile 未变）。
+37 个 skipped 均为门控（真实 PostgreSQL / 真实 Provider 冒烟）。真实库迁移时 `messages` 为 0 行；已有消息行的 false backfill 由 disposable 迁移测试证明，而非真实库。
+
 ---
 
 ## 14. Development Workflow（三方）
@@ -428,7 +481,13 @@ Skipped 测试均为门控（真实 PostgreSQL / 真实外部服务），默认�
 | httpcore2 在 DEBUG 记录完整响应头（可能含 request id、限流元数据、cookie、供应商字段），未做脱敏；原始 DEBUG 日志不得作为可公开 / 可分享证据 | Phase 10B 已接受残留 |
 | Memory pending proposal 仅存于单进程内存：重启丢失、不支持多 API 进程 | Phase 10B 已接受限制（V1 单进程） |
 | Phase 10B 未在真实 PostgreSQL 上执行（迁移与流程仅离线验证） | ONLY IF DEPLOYMENT CHANGES |
-| 工作区中与 Phase 10B 无关的既有状态：`.gitignore` 的未提交修改、未跟踪的 `apisix-docker/`；未纳入任何 Phase 10B commit，也未清理 | 无关既有状态（不属于 Phase 10B） |
+| 工作区中与 Phase 10B / 10C 无关的既有状态：`.gitignore` 的未提交修改、未跟踪的 `apisix-docker/`；未纳入任何 Phase 10B / 10C commit，也未清理 | 无关既有状态（不属于 Phase 10B / 10C） |
+| 既有前端缺陷（早于 Phase 10C，未修改）：重新加载包含「无 task 的 REJECTED 任务建议」的对话时，ChatView 可能白屏 | 未修复（非阻塞，不属于 Phase 10C） |
+| 普通 Chat 的 request session 在 Provider 生成期间保持打开（既有行为）；Phase 10C 只保证 Memory selector 的独立短会话在调用 Provider 前关闭，未重构 Chat 事务生命周期 | 未来加固（Phase 10C 已接受） |
+| Provider 原生 tokenizer 预算不在范围内：Phase 10C 使用确定性的 byte-token accounting units（UTF-8 字节 + 固定信封预留），不代表任何 Provider 的原生 token 数；整段对话的 token 预算同样未做 | Phase 10C 已接受边界 |
+| Phase 10C 未执行 live PostgreSQL gate（迁移仅离线 DDL / portability 验证） | ONLY IF DEPLOYMENT CHANGES |
+| 被标记的 Chat 回复不进入后续自动上下文：用户若要就该回复追问，需重新勾选当前偏好或直接引用相关文字（设计取舍，非缺陷） | Phase 10C 已接受行为 |
+| Phase 10C 浏览器 QA 经既有的日历状态检查在 `%LOCALAPPDATA%\JARVIS\auth` 留下一个空目录；未创建任何凭据 / token 文件，未调用 Microsoft | 非阻塞环境副作用（未清理） |
 
 按阶段汇总：
 
@@ -462,7 +521,7 @@ Natural Language
 | Phase | 方向 |
 | --- | --- |
 | 10B | Explicit Memory Proposal（**CLOSED / ACCEPTED**） |
-| 10C | Bounded Memory Selection / Transparent Context Use |
+| 10C | Explicit Per-Request Personal Memory Use in Ordinary Chat（**CLOSED / ACCEPTED**） |
 | 11A | Read-only Planning V1 |
 | 11B | Confirmed Planning Execution |
 
@@ -473,6 +532,7 @@ Roadmap can change after architecture review.
 ## 20. Key References
 
 - Memory 规格：`docs/phase10a-memory.md`
+- Phase 10C Frozen Spec 与验收记录：`docs/specs/phase10c-frozen-spec.md`；实现入口：`backend/app/services/memory_context_service.py`、`backend/app/services/chat_service.py`、`backend/app/llm/messages.py`
 - Schema lifecycle：`backend/app/services/schema_lifecycle.py`
 - Execution registry：`backend/app/services/execution_registry.py`
 - Action Proposal / Confirm：`backend/app/services/action_proposal_service.py`、`backend/app/services/action_confirm_service.py`

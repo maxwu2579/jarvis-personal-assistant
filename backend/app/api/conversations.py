@@ -11,6 +11,7 @@ from app.schemas.chat import (
     ChatExchangeOut,
     ConversationCreate,
     ConversationOut,
+    MemoryContextOut,
     MessageCreate,
     MessageOut,
     UsageOut,
@@ -68,8 +69,8 @@ def send_message(
     db: Session = Depends(get_db),
     provider: LLMProvider = Depends(get_llm_provider),
 ):
-    user_message, assistant_message, response = chat_service.send_message(
-        db, conversation_id, payload.content, provider
+    user_message, assistant_message, response, memory_context = chat_service.send_message(
+        db, conversation_id, payload.content, provider, tuple(payload.memory_keys)
     )
     return ChatExchangeOut(
         user_message=MessageOut.model_validate(user_message),
@@ -78,6 +79,10 @@ def send_message(
             prompt_tokens=response.prompt_tokens,
             completion_tokens=response.completion_tokens,
             latency_ms=response.latency_ms,
+        ),
+        # 瞬时元数据：仅状态与实际包含的 canonical key，不含值 / 原因 / 行信息
+        memory_context=MemoryContextOut(
+            status=memory_context.status, keys=list(memory_context.keys)
         ),
     )
 

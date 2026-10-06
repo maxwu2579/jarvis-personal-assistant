@@ -51,6 +51,36 @@ export interface Message {
   completion_tokens: number | null
   latency_ms: number | null
   created_at: string
+  /** Phase 10C：该回复生成时提供了已保存偏好；此类回复不会自动进入后续模型上下文。 */
+  memory_context_applied: boolean
+}
+
+// ---- 普通聊天的单次已保存偏好（Phase 10C） ----
+
+export type MemoryContextKey =
+  | 'preferred_study_time'
+  | 'preferred_session_duration'
+  | 'usual_available_days'
+
+export type MemoryContextStatus = 'disabled' | 'applied' | 'empty' | 'unavailable'
+
+/** 本次发送的结果元数据：仅状态与实际提供给模型的 key（不含值）。 */
+export interface MemoryContextResult {
+  status: MemoryContextStatus
+  keys: MemoryContextKey[]
+}
+
+/** 固定顺序（与后端 canonical 顺序一致）。 */
+export const MEMORY_CONTEXT_KEYS: readonly MemoryContextKey[] = [
+  'preferred_study_time',
+  'preferred_session_duration',
+  'usual_available_days',
+]
+
+export const MEMORY_CONTEXT_LABELS: Record<MemoryContextKey, string> = {
+  preferred_study_time: '学习时段',
+  preferred_session_duration: '单次学习时长',
+  usual_available_days: '通常可用日期',
 }
 
 export interface Usage {
@@ -63,6 +93,7 @@ export interface ChatExchange {
   user_message: Message
   assistant_message: Message
   usage: Usage
+  memory_context: MemoryContextResult
 }
 
 export const ROLE_LABELS: Record<MessageRole, string> = {

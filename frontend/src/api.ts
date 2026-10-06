@@ -22,6 +22,7 @@ import type {
   ExecutionEvent,
   ExecutionStatus,
   ExecutionStep,
+  MemoryContextKey,
   Message,
   Notification,
   RAGAnswerResponse,
@@ -168,10 +169,15 @@ export function listMessages(conversationId: number): Promise<Message[]> {
   return request<Message[]>(`/api/conversations/${conversationId}/messages`)
 }
 
-export function sendMessage(conversationId: number, content: string): Promise<ChatExchange> {
+/** 普通聊天发送。memoryKeys 仅为本次发送显式勾选的已保存偏好 key（不发送任何偏好值）。 */
+export function sendMessage(
+  conversationId: number,
+  content: string,
+  memoryKeys: MemoryContextKey[],
+): Promise<ChatExchange> {
   return request<ChatExchange>(`/api/conversations/${conversationId}/messages`, {
     method: 'POST',
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, memory_keys: memoryKeys }),
   })
 }
 

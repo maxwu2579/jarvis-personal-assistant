@@ -455,13 +455,24 @@ def test_migration_003_to_head_roundtrip_preserves_data(tmp_path):
     s.add_all([draft, confirmed, done])
     s.commit()
 
-    from app.models.conversation import Conversation, Message, MessageRole
+    from app.models.conversation import Conversation, MessageRole
 
     conv = Conversation(title="样例对话")
     s.add(conv)
     s.commit()
-    s.add(Message(conversation_id=conv.id, role=MessageRole.USER.value, content="安排任务"))
-    s.add(Message(conversation_id=conv.id, role=MessageRole.ASSISTANT.value, content="好的"))
+    # 历史 revision-003 种子：只写入 003 时实际存在的列，不依赖当前 Message ORM 形状
+    # （当前模型含后续迁移才加入的列，不能用于写入旧 schema）。
+    for role, content, created_at in (
+        (MessageRole.USER.value, "安排任务", datetime(2026, 8, 11, 3, 59, 58)),
+        (MessageRole.ASSISTANT.value, "好的", datetime(2026, 8, 11, 3, 59, 59)),
+    ):
+        s.execute(
+            text(
+                "INSERT INTO messages (conversation_id,role,content,created_at) "
+                "VALUES (:cid,:role,:content,:ts)"
+            ),
+            {"cid": conv.id, "role": role, "content": content, "ts": created_at},
+        )
     s.execute(
         text(
             "INSERT INTO task_proposals (conversation_id,user_message_id,assistant_message_id,"

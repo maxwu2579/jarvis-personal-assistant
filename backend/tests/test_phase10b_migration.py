@@ -21,6 +21,7 @@ from app.services.schema_lifecycle import DatabaseSchemaError, get_alembic_scrip
 
 OLD = '9d0e1f2a3b4c'
 NEW = 'ae1f2a3b4c5d'
+PHASE10C = 'b10c0d1e2f3a'  # current head; extends the chain after NEW
 BACKEND = Path(__file__).resolve().parents[1]
 ACCEPTED = {'c26f1e0161a6', '4756c9756074', '66405497a397', 'a1b2c3d4e5f6', 'fa94512e0868', '8f2a4c1e9b37',
             '4b0f2e1d9c83', '7c9d4e2f5a1b', 'e6f5d4c3b2a1', '6a7b8c9d0e1f2', '7b8c9d0e1f2a3', '8c9d0e1f2a3b4', OLD}
@@ -59,9 +60,10 @@ def seed_phase10a(path):
 
 def test_single_new_revision_and_no_historical_edits():
     script = get_alembic_script_directory()
-    assert script.get_heads() == [NEW]
+    assert script.get_heads() == [PHASE10C]
+    assert script.get_revision(PHASE10C).down_revision == NEW
     assert script.get_revision(NEW).down_revision == OLD
-    assert {rev.revision for rev in script.walk_revisions()} == ACCEPTED | {NEW}
+    assert {rev.revision for rev in script.walk_revisions()} == ACCEPTED | {NEW, PHASE10C}
 
 
 def test_upgrade_from_phase10a_preserves_rows_ids_timestamps_and_high_water(tmp_path, monkeypatch):
@@ -82,10 +84,12 @@ def test_upgrade_from_phase10a_preserves_rows_ids_timestamps_and_high_water(tmp_
     assert error.value.code == 'DATABASE_MIGRATION_NOT_CURRENT'
     assert memory_state(path)[0] == before_rows
 
-    command.upgrade(c, 'head')
+    command.upgrade(c, NEW)
     rows, seq, objects = memory_state(path)
     assert rows == before_rows and seq == before_seq and objects == before_objects
-    assert other_objects(path) == others
+    assert other_objects(path) == others  # the Phase 10B revision touches nothing else
+    command.upgrade(c, 'head')  # later revisions (Phase 10C) leave Memory state untouched
+    assert memory_state(path) == (before_rows, before_seq, before_objects)
     with TestClient(main.app) as client:
         assert client.get('/health/db').status_code == 200
     with sqlite3.connect(path) as db:
@@ -137,7 +141,7 @@ def test_fresh_migration_matches_models(tmp_path, monkeypatch):
     with TestClient(main.app):
         pass
     with engine.connect() as conn:
-        assert MigrationContext.configure(conn).get_current_heads() == (NEW,)
+        assert MigrationContext.configure(conn).get_current_heads() == (PHASE10C,)
         metadata = sa.MetaData()
         PersonalMemory.__table__.to_metadata(metadata)
         MemoryConfirmationReceipt.__table__.to_metadata(metadata)

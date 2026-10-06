@@ -14,6 +14,8 @@ import {
   sendMessage,
 } from '../../api'
 import {
+  MEMORY_CONTEXT_KEYS,
+  MEMORY_CONTEXT_LABELS,
   ROLE_LABELS,
   type ActionProposal,
   type ActionProposalConfirmation,
@@ -22,6 +24,8 @@ import {
   type Conversation,
   type CalendarConnection,
   type ExecutionDetail,
+  type MemoryContextKey,
+  type MemoryContextResult,
   type Message,
   type Task,
   type TaskProposalWithTask,
@@ -75,11 +79,18 @@ export default function ChatView() {
   const [trackedExecutionId, setTrackedExecutionId] = useState<number | null>(initialCalendarExecutionId)
   const [trackedExecution, setTrackedExecution] = useState<ExecutionDetail | null>(null)
   const [trackingError, setTrackingError] = useState<string | null>(null)
+  // Phase 10C：仅本次发送有效的已保存偏好选择（不持久化、不默认勾选）与本次结果提示。
+  const [memoryKeys, setMemoryKeys] = useState<MemoryContextKey[]>([])
+  const [memoryResult, setMemoryResult] = useState<MemoryContextResult | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const actionConfirmGuardRef = useRef<string | null>(null)
   // 竞态防护：对话切换请求序号 + 组件卸载标志
   const selectRequestRef = useRef(0)
   const mountedRef = useRef(true)
+  // 普通聊天在途请求的归属防护：请求序号 + 发送时的对话 / 模式。
+  const chatRequestRef = useRef(0)
+  const activeIdRef = useRef<number | null>(null)
+  const modeRef = useRef<ChatMode>('chat')
 
   useEffect(() => {
     mountedRef.current = true
@@ -146,6 +157,9 @@ export default function ChatView() {
 
   const selectConversation = async (id: number): Promise<void> => {
     const requestId = ++selectRequestRef.current
+    activeIdRef.current = id
+    setMemoryKeys([])
+    setMemoryResult(null)
     setActiveId(id)
     setMessages([])
     setProposals([])
@@ -187,6 +201,7 @@ export default function ChatView() {
     if (activeId === null || input.trim() === '' || sending) return
     setSending(true)
     setError(null)
+    let chatAttempt: { requestId: number; conversationId: number } | null = null
     try {
       if (mode === 'action_proposal') {
         const request = input.trim()
@@ -210,12 +225,27 @@ export default function ChatView() {
         ])
         setNotice('已生成任务建议（草稿，需确认后才生效）')
       } else {
-        const exchange = await sendMessage(activeId, input.trim())
+        // 发送时快照并立即清空选择：下一次发送（含失败后的重试）必须重新勾选。
+        const requestId = ++chatRequestRef.current
+        const conversationId = activeId
+        const keys = MEMORY_CONTEXT_KEYS.filter((key) => memoryKeys.includes(key))
+        chatAttempt = { requestId, conversationId }
+        setMemoryKeys([])
+        setMemoryResult(null)
+        const exchange = await sendMessage(conversationId, input.trim(), keys)
+        if (!isCurrentChatRequest(requestId, conversationId)) {
+          // 用户已切换对话 / 模式：请求已为原对话完成，但回复与提示不得附着到当前视图。
+          setInput('')
+          void loadConversations()
+          return
+        }
         setMessages((prev) => [...prev, exchange.user_message, exchange.assistant_message])
+        setMemoryResult(exchange.memory_context.status === 'disabled' ? null : exchange.memory_context)
       }
       setInput('')
       void loadConversations()
     } catch (err) {
+      if (chatAttempt && !isCurrentChatRequest(chatAttempt.requestId, chatAttempt.conversationId)) return
       showError(err)
     } finally {
       setSending(false)
@@ -239,12 +269,27 @@ export default function ChatView() {
     window.setTimeout(() => setNotice(null), 4000)
   }
 
+  const isCurrentChatRequest = (requestId: number, conversationId: number): boolean =>
+    mountedRef.current &&
+    requestId === chatRequestRef.current &&
+    activeIdRef.current === conversationId &&
+    modeRef.current === 'chat'
+
+  const toggleMemoryKey = (key: MemoryContextKey): void => {
+    setMemoryKeys((current) =>
+      current.includes(key) ? current.filter((item) => item !== key) : [...current, key],
+    )
+  }
+
   const switchMode = (nextMode: ChatMode): void => {
     if (nextMode !== mode) {
       setActionProposals([])
       setInput('')
       setError(null)
+      setMemoryKeys([])
+      setMemoryResult(null)
     }
+    modeRef.current = nextMode
     setMode(nextMode)
   }
 
@@ -406,6 +451,11 @@ export default function ChatView() {
                 )}
               </div>
               <div className="msg-content">{message.content}</div>
+              {message.memory_context_applied && (
+                <div className="msg-meta">
+                  <span className="msg-model">生成时提供了已保存偏好；不自动用于后续模型上下文</span>
+                </div>
+              )}
             </div>
           ))}
           <div ref={messagesEndRef} />
@@ -456,6 +506,50 @@ export default function ChatView() {
               />
             ))}
           </section>
+        )}
+
+        {mode === 'chat' && memoryResult && (
+          <div
+            className={`banner ${memoryResult.status === 'applied' ? 'banner--success' : 'banner--error'}`}
+            role="status"
+            aria-label="已保存偏好使用情况"
+          >
+            <span>
+              {memoryResult.status === 'applied'
+                ? `本次已向模型提供已保存偏好：${memoryResult.keys
+                    .map((key) => MEMORY_CONTEXT_LABELS[key])
+                    .join('、')}`
+                : memoryResult.status === 'empty'
+                  ? '所选偏好不存在或不可用，本次未使用记忆'
+                  : '暂时无法读取已保存偏好，本次未使用记忆'}
+            </span>
+          </div>
+        )}
+
+        {mode === 'chat' && (
+          <fieldset className="chat-mode-row" aria-label="本次使用已保存偏好（可选）">
+            <legend className="form-hint">本次使用已保存偏好（可选）</legend>
+            {MEMORY_CONTEXT_KEYS.map((key) => (
+              <label key={key}>
+                <input
+                  type="checkbox"
+                  checked={memoryKeys.includes(key)}
+                  disabled={activeId === null || sending}
+                  onChange={() => toggleMemoryKey(key)}
+                />{' '}
+                {MEMORY_CONTEXT_LABELS[key]}
+              </label>
+            ))}
+            <p className="form-hint">
+              所选偏好将随本次消息发送给当前配置的模型服务；回复会保存在本地对话中。使用发送时读取的已保存值。
+            </p>
+            <p className="form-hint">
+              这些回复保留在本地，但不会自动发送到后续对话或提案请求。删除记忆不会删除历史回复。
+            </p>
+            <p className="form-hint">
+              如需就带有该标记的回复继续提问，请重新勾选当前偏好，或在消息中直接引用相关文字。
+            </p>
+          </fieldset>
         )}
 
         <form className="chat-input-row" onSubmit={handleSend}>

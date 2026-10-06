@@ -48,6 +48,11 @@ def test_existing_upgrade_fail_closed_startup_and_downgrade(tmp_path, monkeypatc
             pass
     assert error.value.code == 'DATABASE_MIGRATION_NOT_CURRENT'
     assert historical_snapshot(path) == original
+    # Phase 10A's "nothing else changed" invariant is evaluated at the Phase 10A revision itself;
+    # later phases legitimately extend other tables (e.g. Phase 10C adds a messages column).
+    command.upgrade(c, NEW)
+    assert 'personal_memories' in sa.inspect(engine).get_table_names()
+    assert historical_snapshot(path) == original
     command.upgrade(c, 'head')
     with TestClient(main.app) as client:
         assert client.get('/health').status_code == 200
@@ -55,7 +60,6 @@ def test_existing_upgrade_fail_closed_startup_and_downgrade(tmp_path, monkeypatc
     assert set(inspector.get_table_names()) >= {'personal_memories', 'tasks', 'executions'}
     assert {c['name'] for c in inspector.get_columns('personal_memories')} == {'id','category','key','value_json','source_type','version','created_at','updated_at'}
     assert inspector.get_unique_constraints('personal_memories')[0]['column_names'] == ['key']
-    assert historical_snapshot(path) == original
     command.downgrade(c, OLD)
     assert 'personal_memories' not in sa.inspect(engine).get_table_names()
     assert historical_snapshot(path) == original
