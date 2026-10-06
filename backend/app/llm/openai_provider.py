@@ -110,7 +110,7 @@ def build_chat_client(
     """构造 OpenAI SDK 客户端（惰性初始化，不发起任何网络请求）。"""
     import openai
 
-    protect_sdk_loggers()  # SDK DEBUG 日志会记录完整请求体（用户句子 / prompt）
+    protect_sdk_loggers()  # 纵深防御：openai.* 日志不得携带请求体（用户句子 / prompt）
 
     client_kwargs: dict = {"api_key": api_key, "timeout": timeout_seconds}
     if base_url:

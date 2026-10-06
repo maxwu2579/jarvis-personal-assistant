@@ -14,6 +14,9 @@
 | Repository | `C:\Users\25795\Desktop\Personal AI Assistant（JARVIS）` |
 | Branch | `main` |
 | Accepted baseline commit | `5b8d343dba31fde13c4c29018492e77675e7b2ea`（`feat: add minimal personal memory foundation`，2026-09-26） |
+| Phase 10B implementation checkpoint | `9040c83d9019e3a1d51000e4d0d7e8320f8c530a`（`feat: add explicit memory proposal and confirmation checkpoint`，2026-10-03） |
+| Phase 10B final checkpoint | `9040c83` 之上的下一个 commit：`chore: close phase 10b memory proposal validation`（2026-10-06；SHA 以 `git log` 为准，文件无法自引用）。Phase 10B 验收后，该 commit 为当前 accepted baseline |
+| Current Python | 3.12.10（`backend\.venv`） |
 | Stack | Backend FastAPI + SQLAlchemy + Alembic（SQLite 默认 / PostgreSQL 可选）；Frontend React + TypeScript + Vite |
 
 运行边界：
@@ -33,10 +36,15 @@
 | Phase 0–9 | COMPLETE / CLOSED |
 | Phase 9.5 — DB Lifecycle Hardening | COMPLETE / CLOSED |
 | Phase 10A — Minimal Personal Memory Foundation | COMPLETE / CLOSED |
-| Phase 10B — Explicit Memory Proposal & Confirmation | IMPLEMENTED（未提交）— 待 Luna QA / Real Provider Gate / Real DB Gate；**NOT CLOSED** |
+| Phase 10B — Explicit Memory Proposal & Confirmation | **CLOSED / ACCEPTED**（Astra，2026-10-06） |
 
-- Current open development phase: **Phase 10B**（实现完成，uncommitted，基于 `a6e1b8e`）
-- Phase 10B 规格：[`docs/phase10b-memory-proposals.md`](docs/phase10b-memory-proposals.md)
+- Current open development phase: **无**。下一阶段 Phase 10C 仅可开始 planning，尚未授权实现（见 §19）。
+- Phase 10B 规格与验收记录：[`docs/phase10b-memory-proposals.md`](docs/phase10b-memory-proposals.md)
+- Phase 10B final gate state：
+  - Implementation / Regression：**PASS**
+  - SDK 3.24 environment / privacy：**PASS**
+  - Real Provider Gate：**PASS**（2026-10-05；deepseek / `deepseek-v4-flash`；授权 2 次真实业务调用，实际 2 次；SDK transport 重试 0 次）
+  - Real DB Gate：**PASS**（真实库现为 `ae1f2a3b4c5d`，见 §7）
 
 ---
 
@@ -52,7 +60,7 @@
 | Retrieval / RAG | SQLite：FTS5/BM25 + LocalHash（非语义）+ RRF；PG：ILIKE 回退 + pgvector；RAG 后端分配引用标签 + allowlist 校验，证据不足弃权 | `/api/retrieval`、`/api/rag/ask` |
 | Execution Engine | Execution / Attempt / Step / Event、租约、重试、`run_at`、确认门 | `/api/executions`；`python -m app.services.execution_worker` |
 | Outlook Calendar | Microsoft Graph 读（calendarView）+ 经 Proposal/Confirm/Execution 的写 | `/api/calendar`（仅本地请求） |
-| Personal Memory | Phase 10A 手动 CRUD（见 §5）；Phase 10B（未关闭）：记忆 tab 内显式自然语言提案 → 预览 → 显式确认 | `/api/memories`、`/api/memories/proposals`；前端「记忆」tab |
+| Personal Memory | Phase 10A 手动 CRUD（见 §5）；Phase 10B：记忆 tab 内显式自然语言提案 → 预览 → 显式确认 | `/api/memories`、`/api/memories/proposals`；前端「记忆」tab |
 
 健康检查：`/health`（liveness）、`/health/db`（readiness，只读核对 revision）、`/health/embedding`。
 
@@ -100,7 +108,7 @@ Action Proposal intent allowlist：`create_task`、`create_task_with_reminder`�
 Manual Memory UI / API → Create / Read / Update / Delete
 ```
 
-**D. Personal Memory（Phase 10B，已实现、未关闭）**
+**D. Personal Memory（Phase 10B）**
 
 ```
 记忆 tab 一句话 → 冻结 V1 语法（全匹配）→ 受约束 LLM candidate → strict schema
@@ -118,7 +126,7 @@ Manual Memory UI / API → Create / Read / Update / Delete
 
 - Categories：`preference`、`stable_fact`、`constraint`（仅此三类）
 - Memory 性质：user-visible、editable、deletable、source-aware、version protected
-- `source_type`：`manual`；Phase 10B（未关闭）新增 `user_confirmed`（确认的提案）。服务端控制，客户端 / LLM 不可提供；手动更新总是重置为 `manual`
+- `source_type`：`manual`；Phase 10B 新增 `user_confirmed`（确认的提案）。服务端控制，客户端 / LLM 不可提供；手动更新总是重置为 `manual`
 - value：bounded structured JSON（标量 / ≤64 标量列表 / ≤32 字段扁平对象；无 null、无嵌套；紧凑 JSON ≤ 4096 UTF-8 bytes）
 - key：1–80 ASCII，小写字母开头，`[a-z0-9_]`；单用户内全局唯一（重复 409 `MEMORY_KEY_CONFLICT`）
 - version：optimistic concurrency（`expected_version` 数据库谓词 CAS；陈旧 409 `MEMORY_VERSION_CONFLICT`；无自动重试、无静默覆盖）
@@ -155,13 +163,19 @@ Memory **不得**复制其它 domain 的 mutable operational truth（例如「�
 - Production schema authority：**ALEMBIC ONLY**
 - Production startup：NO `create_all`、NO automatic upgrade、NO automatic stamp、NO automatic repair
 - Startup：**READ / VERIFY ONLY**（revision 必须等于迁移链唯一 head，否则 fail closed；SQLite 文件不存在时在首次连接前拒绝启动）
-- Accepted head（baseline `a6e1b8e`）：`9d0e1f2a3b4c`
-- Working-tree head（Phase 10B，未提交）：**`ae1f2a3b4c5d`**（`user_confirmed` source + `memory_confirmation_receipts`；down_revision `9d0e1f2a3b4c`；迁移链线性，共 14 个 revision）
+- Accepted head（Phase 10B）：**`ae1f2a3b4c5d`**（`user_confirmed` source + `memory_confirmation_receipts`；down_revision `9d0e1f2a3b4c`；迁移链线性，共 14 个 revision）
+- 上一个 accepted head（Phase 10A）：`9d0e1f2a3b4c`
 - Current real SQLite DB：`backend/jarvis.db`
-  - Alembic revision：`9d0e1f2a3b4c`（**尚未**迁移到 `ae1f2a3b4c5d`；Real DB Gate 未授权。在此之前，用 Phase 10B 代码启动并指向真实库会按设计 fail closed）
-  - `personal_memories`：present
-  - current Memory rows：0
-  - 以上状态于 2026-09-28 以只读方式（`mode=ro`）复核。这是最近验收状态，不是永久规格；DB 二进制哈希不作为规格记录。
+  - Alembic revision：**`ae1f2a3b4c5d`**（Real DB Gate PASS；已由显式授权的 migration gate 从 `9d0e1f2a3b4c` 迁移）
+  - 当前预期的 Phase 10B 持久审计状态：
+    - `personal_memories` rows = **0**
+    - `memory_confirmation_receipts` rows = **2**（`CREATE` 与 `UPDATE` 各一条，均为 `APPLIED`）
+    - `personal_memories` 的 `sqlite_sequence`（AUTOINCREMENT high-water）= **2**
+    - SQLite `quick_check`：`ok`
+  - **这 2 条 receipt 是有意保留的历史审计记录**（Real DB Gate 的确认回执；receipt 无外键，按设计在 Memory 删除后继续存在）。**不得**仅为了让数据库「看起来干净」而删除它们；high-water = 2 同理不得重置。
+  - Real DB Gate 结束时的 DB SHA-256（gate 时点证据，**不是**规格；此后任何合法写入都会改变它）：`6594741e55809557a7133dff5f9477cb0562bb3e4c9f4199c4e797bfa057c842`
+  - Real DB Gate 的备份 / 证据目录在仓库外：`C:\Users\25795\JARVIS-DB-Gate-Backups\phase10b-20261005T101920Z`。**不得**复制进仓库。
+  - 以上状态于 2026-10-06 以只读方式（`mode=ro`）复核，与上述记录一致。这是最近验收状态，不是永久规格。
 - 测试从不接触真实 `jarvis.db`：测试使用 disposable SQLite，并显式执行 `alembic upgrade head`；测试中的隔离 `create_all` 仅为脚手架，不属于 production startup。
 
 ---
@@ -223,6 +237,16 @@ uvicorn app.main:app        # 再启动 JARVIS
   - **APPLICATION LAYER**：JARVIS 应用代码没有额外实现生成型调用的重试循环。
   - **SDK / TRANSPORT LAYER**：OpenAI SDK 客户端构造时未设置 `max_retries=0`，DeepSeek 走同一客户端路径；已安装 SDK 的默认配置可能执行 transport 级重试。
   - 断言「SDK 方法只被调用一次」的 mock **不能证明**只发出一次 wire-level HTTP 请求；不得声称 wire-level exactly-once。
+- 当前验证运行时（2026-10-05，`backend\.venv`）：
+  - `openai` **3.24.0**（Astra 接受为当前 validation runtime；不降级，不重建已丢失的历史 SDK 版本）
+  - 默认 HTTP 栈：`openai 3.24.0 → httpx2 2.13.1 → httpcore2 2.13.1`（不再是 httpx / httpcore）
+  - legacy `httpx 0.28.1` / `httpcore 1.0.9` 仍安装：Graph 客户端使用；SDK 也仍接受显式注入的 legacy `httpx.Client`
+  - `python-multipart 0.0.32`（Documents API 上传所需的运行期依赖，已在 `requirements.txt` 声明）
+  - `pypdf 6.19.0`、`python-docx 1.2.0`（文档解析所需的运行期依赖，已在 `requirements.txt` 声明）
+- SDK / transport 日志（详见 `docs/phase10b-memory-proposals.md` R2）：
+  - openai 3.24.0 的 `openai.*` 日志仅含元数据；`app/llm/sdk_logging.py` 为纵深防御（历史 SDK 版本会在 DEBUG 记录请求体）。
+  - `httpx2` / `httpcore2` logger **未**过滤；Phase 9A `secure_library_logging()` 只压制 legacy `httpx` / `httpcore`。
+  - **已接受残留（Phase 10B）**：httpcore2 在 DEBUG 记录完整响应头（可能含 request id、限流元数据、cookie、供应商字段）。原始 DEBUG 日志**不得**作为可公开 / 可分享证据。
 
 ---
 
@@ -285,9 +309,9 @@ Internal（`INTERNAL_EXECUTION_TYPES`，公共 API 视为不存在 → 404）：
 
 Skipped 测试均为门控（真实 PostgreSQL / 真实外部服务），默认跳过而非伪造通过。
 
-### Phase 10B — Claude first-pass（2026-09-29，含 Astra 裁定修正，uncommitted working tree on `a6e1b8e`）
+### Phase 10B — Claude first-pass（2026-09-29，含 Astra 裁定修正；当时为 `a6e1b8e` 上的未提交工作区，现为 checkpoint `9040c83`）
 
-这是实现者首轮结果，**不是**已接受 baseline；Luna 独立 QA 尚未执行。
+**历史记录**：这是实现者首轮结果，来自**旧环境**（旧版 OpenAI / FastAPI / Pydantic / SQLAlchemy / pytest），不能代表当前环境。下表中的 gate 状态是当时的状态；最终状态见本节末尾「Phase 10B — FINAL ACCEPTED」。
 
 | 项 | 结果 |
 | --- | --- |
@@ -299,6 +323,44 @@ Skipped 测试均为门控（真实 PostgreSQL / 真实外部服务），默认�
 | Real PostgreSQL | NOT RUN（门控跳过） |
 | Real Provider Gate | NOT RUN（未授权） |
 | Real DB Gate | NOT RUN（未授权；真实库仍为 `9d0e1f2a3b4c`） |
+
+### Phase 10B — SDK 3.24 environment fix（2026-10-05，当时为 `9040c83` 上的未提交工作区，现已包含在 final checkpoint 中）
+
+**历史记录**（按时间顺序保留）。环境：Python 3.12.10、openai 3.24.0、httpx2 2.13.1、httpcore2 2.13.1、fastapi 0.142.2、pydantic 2.13.5、SQLAlchemy 2.1.3、pytest 9.1.1。
+
+| 项 | 结果 |
+| --- | --- |
+| `python-multipart` 声明 / 安装 | `requirements.txt` 已声明；已安装 0.0.32；`pip check` PASS |
+| `app.main` import / Documents API 注册 / pytest collection | PASS / PASS / PASS（disposable `DATABASE_URL`） |
+| SDK privacy tests（`test_phase10b_sdk_log_privacy.py`） | 33 PASS（native `httpx2.MockTransport` + 默认 client 的 `127.0.0.1` loopback；真实 httpcore2 DEBUG 日志已触发） |
+| Provider / embedding / Phase 5C | 123 PASS |
+| Phase 10B targeted | 308 PASS |
+| Phase 10A regression | 66 PASS |
+| Migration / schema | 23 PASS |
+| Full pytest（首轮，仅 `python-multipart` 修复后） | 1479 collected：1431 passed，11 failed，37 skipped，0 errors，exit code 1 |
+| 文档依赖修复：`pypdf` / `python-docx` 声明 / 安装 | `requirements.txt` 已声明；已安装 pypdf 6.19.0、python-docx 1.2.0（连带 lxml 6.1.3）；`pip check` PASS |
+| 原 11 个失败用例 | 11 PASS |
+| Document / parser regression | 135 PASS |
+| **Full pytest（最终）** | **1479 collected：1442 passed，0 failed，37 skipped，0 errors，exit code 0** |
+| Real Provider / Real DB（当时） | 未调用 / 未迁移 |
+
+首轮的 11 个失败全部来自同一原因：文档解析器使用的 `pypdf` 与 `python-docx`（import 名 `docx`）是**未声明的运行期依赖**（pre-existing dependency manifest defect）。Astra 批准后已在 `requirements.txt` 声明并经 manifest 安装；未修改 parser / document service / 测试代码。37 个 skipped 均为门控（真实 PostgreSQL / 真实 Provider 冒烟）。
+
+已记录技术债（Astra 接受）：Phase 9A `secure_library_logging()` 只压制 legacy `httpx` / `httpcore`，不覆盖 `httpx2` / `httpcore2`。
+
+### Phase 10B — FINAL ACCEPTED（Astra，2026-10-06）
+
+| 项 | 最终结果 |
+| --- | --- |
+| Phase 10B | **CLOSED / ACCEPTED** |
+| Implementation / Regression | PASS / PASS |
+| Fresh-environment full backend pytest | **1479 collected：1442 passed，37 skipped，0 failed，0 errors，exit code 0** |
+| Runtime | Python 3.12.10；openai 3.24.0；httpx2 2.13.1；httpcore2 2.13.1；python-multipart 0.0.32；pypdf 6.19.0；python-docx 1.2.0；lxml 6.1.3 |
+| Real Provider Gate | **PASS**（deepseek / `deepseek-v4-flash`；授权真实业务调用 2，实际 2；SDK transport 重试 0；使用 disposable DB） |
+| Real DB Gate | **PASS**（真实库 revision `ae1f2a3b4c5d`；Memory rows 0；历史 receipts 2；AUTOINCREMENT high-water 2；`quick_check` ok） |
+| Real PostgreSQL | NOT RUN（Phase 10B 未在真实 PostgreSQL 上执行；见 §17） |
+
+37 个 skipped 均为门控（真实 PostgreSQL / 真实 Provider 冒烟），默认跳过而非伪造通过。
 
 ---
 
@@ -361,6 +423,12 @@ Skipped 测试均为门控（真实 PostgreSQL / 真实外部服务），默认�
 | single-user local security boundary | ONLY IF DEPLOYMENT CHANGES（full authentication / multi-user isolation） |
 | real PostgreSQL integration not verified（本 baseline） | ONLY IF DEPLOYMENT CHANGES（real PostgreSQL deployment validation） |
 | SQLite `value_json`（JSON → NUMERIC affinity）会丢失历史手动值的 float/int 类型（`45.0` 读回 `45`）；Phase 10B 比较实际读回值，无法恢复已丢失的类型（Astra：非阻塞既有限制） | 未来存储模型考虑（未修复） |
+| 依赖可复现性不完整：`requirements*.txt` 多为下界约束，没有完整 lock 策略；Phase 10B 期间恢复的环境因此暴露出 3 个未声明的运行期依赖（已补声明），未来环境仍可能解析到不同版本 | Phase 10B 已接受 / 延后（未修复） |
+| Phase 9A `secure_library_logging()` 只压制 legacy `httpx` / `httpcore` logger；openai 3.24 的默认栈 `httpx2` / `httpcore2` 不在其名单内 | Phase 10B 已接受 / 延后（未修复） |
+| httpcore2 在 DEBUG 记录完整响应头（可能含 request id、限流元数据、cookie、供应商字段），未做脱敏；原始 DEBUG 日志不得作为可公开 / 可分享证据 | Phase 10B 已接受残留 |
+| Memory pending proposal 仅存于单进程内存：重启丢失、不支持多 API 进程 | Phase 10B 已接受限制（V1 单进程） |
+| Phase 10B 未在真实 PostgreSQL 上执行（迁移与流程仅离线验证） | ONLY IF DEPLOYMENT CHANGES |
+| 工作区中与 Phase 10B 无关的既有状态：`.gitignore` 的未提交修改、未跟踪的 `apisix-docker/`；未纳入任何 Phase 10B commit，也未清理 | 无关既有状态（不属于 Phase 10B） |
 
 按阶段汇总：
 
@@ -370,9 +438,9 @@ Skipped 测试均为门控（真实 PostgreSQL / 真实外部服务），默认�
 
 ---
 
-## 18. Phase 10B Architecture — FROZEN / IMPLEMENTED（uncommitted）/ NOT CLOSED
+## 18. Phase 10B Architecture — FROZEN / CLOSED / ACCEPTED
 
-**Phase 10B：Explicit Memory Proposal & Confirmation**（Astra 已冻结规格；Claude 已实现，待 Luna QA 与外部 Gate。实现细节见 `docs/phase10b-memory-proposals.md`）
+**Phase 10B：Explicit Memory Proposal & Confirmation**（Astra 已冻结规格并于 2026-10-06 验收关闭。实现细节见 `docs/phase10b-memory-proposals.md`）
 
 ```
 Natural Language
@@ -393,7 +461,7 @@ Natural Language
 
 | Phase | 方向 |
 | --- | --- |
-| 10B | Explicit Memory Proposal（已实现，未关闭） |
+| 10B | Explicit Memory Proposal（**CLOSED / ACCEPTED**） |
 | 10C | Bounded Memory Selection / Transparent Context Use |
 | 11A | Read-only Planning V1 |
 | 11B | Confirmed Planning Execution |

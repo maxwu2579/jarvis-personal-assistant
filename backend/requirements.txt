@@ -4,6 +4,11 @@ sqlalchemy>=2.0.36
 pydantic>=2.9
 pydantic-settings>=2.4
 alembic>=1.13
+# Documents API 的 UploadFile / File(...)（multipart/form-data）在路由注册时即需要
+python-multipart>=0.0.9
+# 文档解析（Phase 4A）：.pdf 文本提取 / .docx 段落与表格提取（import 名为 docx）
+pypdf>=6.19,<7
+python-docx>=1.2,<2
 openai>=1.40
 # Phase 9A: public-client OAuth, Windows encrypted cache, Graph HTTP client.
 msal>=1.38.0,<2

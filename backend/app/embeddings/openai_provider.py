@@ -180,7 +180,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
 
                 from app.llm.sdk_logging import protect_sdk_loggers
 
-                protect_sdk_loggers()  # SDK DEBUG 日志会记录完整请求体（文档 / 查询文本）
+                protect_sdk_loggers()  # 纵深防御：openai.* 日志不得携带请求体（文档 / 查询文本）
                 self._client = openai.OpenAI(
                     api_key=self._api_key,
                     base_url=self._base_url,
