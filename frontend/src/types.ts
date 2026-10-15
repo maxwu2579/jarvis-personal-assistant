@@ -610,3 +610,84 @@ export interface MemoryConfirmResult {
   replayed: boolean
 }
 export interface MemoryCancelResult { status: 'CANCELLED'; proposal_id: string }
+
+// ---- 今天（Phase 11A）：只读的本地日聚合投影 ----
+
+export type TodaySectionStatus = 'ok' | 'unavailable'
+
+export interface TodayList<T> {
+  items: T[]
+  total: number
+  truncated: boolean
+}
+
+export interface TodayTask {
+  id: number
+  title: string
+  status: 'DRAFT' | 'CONFIRMED'
+  due_at: string | null
+}
+
+export interface TodayReminder {
+  id: number
+  task_id: number
+  task_title: string
+  status: 'PENDING' | 'CLAIMED' | 'DELIVERED' | 'FAILED'
+  remind_at: string
+}
+
+export interface TodayNotification {
+  id: number
+  task_id: number
+  title: string
+  body: string
+  created_at: string
+}
+
+export type TodayExecutionReason = 'confirmation_required' | 'failed' | 'timed_out'
+
+export interface TodayExecution {
+  id: number
+  execution_type: string
+  status: string
+  reason: TodayExecutionReason
+  occurred_at: string
+}
+
+/** section 不可读时 status 为 unavailable，其余字段均为 null（不是空列表）。 */
+export interface TodayTaskSection {
+  status: TodaySectionStatus
+  drafts: TodayList<TodayTask> | null
+  overdue: TodayList<TodayTask> | null
+  due_today: TodayList<TodayTask> | null
+  other_open: { later: number; no_due_date: number } | null
+}
+
+export interface TodayReminderSection {
+  status: TodaySectionStatus
+  scheduled: TodayList<TodayReminder> | null
+  delivered: TodayList<TodayReminder> | null
+  attention: TodayList<TodayReminder> | null
+}
+
+export interface TodayNotificationSection {
+  status: TodaySectionStatus
+  unread: TodayList<TodayNotification> | null
+}
+
+export interface TodayExecutionSection {
+  status: TodaySectionStatus
+  attention: TodayList<TodayExecution> | null
+}
+
+export interface TodayProjection {
+  timezone: string
+  local_date: string
+  generated_at: string
+  day_start: string
+  day_end: string
+  tasks: TodayTaskSection
+  reminders: TodayReminderSection
+  notifications: TodayNotificationSection
+  executions: TodayExecutionSection
+}

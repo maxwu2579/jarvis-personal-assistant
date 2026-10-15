@@ -1545,3 +1545,20 @@ textarea:disabled {
 .memory-proposal input[type="text"] { min-width: 260px; flex: 1; }
 .badge--create { background: #dcfce7; color: #166534; }
 .badge--update { background: #fef3c7; color: #92400e; }
+
+/* Phase 11A: Today (additive .today- selectors only) */
+.today { max-width: 960px; margin: 0 auto; }
+.today-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.today-header h2 { margin: 0; overflow-wrap: anywhere; }
+.today-section { margin: 16px 0; padding: 12px 16px; border: 1px solid #d9dee6; border-radius: 8px; background: #fff; }
+.today-section h3 { margin: 0 0 8px; }
+.today-group h4 { margin: 12px 0 4px; font-size: 0.95rem; }
+.today-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.today-item { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 8px 0; border-top: 1px solid #eef1f5; }
+.today-list .today-item:first-child { border-top: 0; }
+.today-item-main { display: grid; gap: 2px; min-width: 0; flex: 1 1 240px; }
+.today-item-title { font-weight: 600; overflow-wrap: anywhere; }
+.today-item-meta { color: #526174; font-size: 0.9rem; overflow-wrap: anywhere; }
+.today-item-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.today-unavailable { margin: 0 0 8px; color: #8a4b12; }
+.today-other-open { margin: 8px 0 0; }

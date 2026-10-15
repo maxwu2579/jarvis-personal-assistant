@@ -28,6 +28,7 @@ from app.api.rag import router as rag_router
 from app.api.reminders import router as reminders_router
 from app.api.retrieval import router as retrieval_router
 from app.api.tasks import router as tasks_router
+from app.api.today import TODAY_PATH, router as today_router
 from app.api.memories import router as memories_router
 from app.api.memory_proposals import router as memory_proposals_router
 from app.services.memory_proposal_store import get_memory_proposal_store
@@ -306,7 +307,7 @@ async def execution_error_handler(request: Request, exc: ExecutionError):
 
 
 @app.exception_handler(OperationalError)
-async def database_unavailable_handler(_: Request, exc: OperationalError):
+async def database_unavailable_handler(request: Request, exc: OperationalError):
     """数据库不可用（连接失败/锁定等）→ 稳定 503。
 
     Phase 5A：PG 不可用（或 SQLite 锁定）必须返回稳定可读的脱敏错误——
@@ -316,6 +317,8 @@ async def database_unavailable_handler(_: Request, exc: OperationalError):
     return JSONResponse(
         status_code=503,
         content=_error_body("SERVICE_UNAVAILABLE", "Database is unavailable"),
+        # Phase 11A：仅 Today 路径 —— 错误响应同样 no-store（响应体与状态码不变）。
+        headers={"Cache-Control": NO_STORE} if request.url.path == TODAY_PATH else None,
     )
 
 
@@ -332,8 +335,9 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     logger.exception("Unhandled error: %s", exc)
     cid = _correlation_id(request)
     headers = {"X-Request-ID": cid} if cid else {}
-    if is_messages_resource(request.url.path):
+    if is_messages_resource(request.url.path) or request.url.path == TODAY_PATH:
         # Phase 10C：本 handler 的响应绕过中间件，这里补上 messages 资源的 no-store。
+        # Phase 11A：Today 路径同样 no-store（仅该路径；响应体、状态码与日志不变）。
         headers["Cache-Control"] = NO_STORE
     return JSONResponse(
         status_code=500,
@@ -353,6 +357,7 @@ app.include_router(retrieval_router)
 app.include_router(rag_router)
 app.include_router(executions_router)
 app.include_router(calendar_router)
+app.include_router(today_router)
 
 
 @app.get("/", tags=["meta"])

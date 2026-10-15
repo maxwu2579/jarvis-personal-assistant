@@ -33,6 +33,7 @@ import type {
   TaskCreatePayload,
   TaskProposalExchange,
   TaskProposalWithTask,
+  TodayProjection,
 } from './types'
 
 // 后端地址通过环境变量 VITE_API_BASE_URL 配置（frontend/.env.local），
@@ -455,4 +456,11 @@ export function rejectStep(
     `/api/executions/${executionId}/steps/${stepId}/reject`,
     { method: 'POST', body: JSON.stringify({ actor }) },
   )
+}
+
+// ---- 今天（Phase 11A） ----
+
+/** 今天的只读聚合投影。timezone 必须是浏览器的 IANA 时区；后端不做任何回退。 */
+export function getToday(timezone: string): Promise<TodayProjection> {
+  return request<TodayProjection>(`/api/today?${new URLSearchParams({ timezone })}`)
 }

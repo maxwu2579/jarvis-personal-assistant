@@ -16,17 +16,20 @@ import MemoryPanel from './components/memories/MemoryPanel'
 import NotificationCenter from './components/NotificationCenter'
 import TaskForm from './components/TaskForm'
 import TaskList from './components/TaskList'
+import TodayView from './components/today/TodayView'
 import type { NewTaskInput, Reminder, Task } from './types'
 
-type Tab = 'tasks' | 'chat' | 'documents' | 'executions' | 'calendar' | 'memories'
+type Tab = 'today' | 'tasks' | 'chat' | 'documents' | 'executions' | 'calendar' | 'memories'
 
+/** 默认落地页为「今天」（Phase 11A）；`tab` 参数缺失或无法识别时同样进入「今天」。 */
 function initialTab(): Tab {
-  if (new URLSearchParams(window.location.search).get('tab') === 'memories') return 'memories'
-  if (new URLSearchParams(window.location.search).get('tab') === 'chat') return 'chat'
-  if (new URLSearchParams(window.location.search).get('tab') === 'calendar') return 'calendar'
-  return new URLSearchParams(window.location.search).get('tab') === 'executions'
-    ? 'executions'
-    : 'tasks'
+  const requested = new URLSearchParams(window.location.search).get('tab')
+  if (requested === 'memories') return 'memories'
+  if (requested === 'chat') return 'chat'
+  if (requested === 'calendar') return 'calendar'
+  if (requested === 'executions') return 'executions'
+  if (requested === 'tasks') return 'tasks'
+  return 'today'
 }
 
 function TaskSection() {
@@ -173,7 +176,12 @@ export default function App() {
   const selectTab = (nextTab: Tab): void => {
     setTab(nextTab)
     const url = new URL(window.location.href)
-    if (nextTab === 'executions' || nextTab === 'calendar' || nextTab === 'memories') {
+    if (nextTab === 'tasks') {
+      // 「今天」成为默认页后，任务页通过 ?tab=tasks 寻址
+      url.searchParams.set('tab', 'tasks')
+      url.searchParams.delete('execution')
+      url.searchParams.delete('calendar_execution')
+    } else if (nextTab === 'executions' || nextTab === 'calendar' || nextTab === 'memories') {
       url.searchParams.set('tab', nextTab)
       if (nextTab !== 'executions') url.searchParams.delete('execution')
       url.searchParams.delete('calendar_execution')
@@ -231,6 +239,15 @@ export default function App() {
         <button
           type="button"
           role="tab"
+          aria-selected={tab === 'today'}
+          className={`tab-btn${tab === 'today' ? ' tab-btn--active' : ''}`}
+          onClick={() => selectTab('today')}
+        >
+          今天
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={tab === 'tasks'}
           className={`tab-btn${tab === 'tasks' ? ' tab-btn--active' : ''}`}
           onClick={() => selectTab('tasks')}
@@ -279,7 +296,7 @@ export default function App() {
         />
       )}
 
-      {tab === 'memories' ? <MemoryPanel /> : tab === 'calendar' ? <CalendarPanel /> : tab === 'tasks' ? (
+      {tab === 'today' ? <TodayView /> : tab === 'memories' ? <MemoryPanel /> : tab === 'calendar' ? <CalendarPanel /> : tab === 'tasks' ? (
         <TaskSection />
       ) : tab === 'documents' ? (
         <DocumentsView />
